@@ -1,5 +1,7 @@
 package com.example.paymentevent.kafka;
 
+import com.example.paymentevent.domain.Payment;
+
 import java.math.BigDecimal;
 
 /**
@@ -12,4 +14,9 @@ public record PaymentEvent(
         String toAccount,
         BigDecimal amount,
         String currency) {
+
+    public static PaymentEvent from(Payment payment) {
+        return new PaymentEvent(payment.getPaymentId(), payment.getFromAccount(), payment.getToAccount(),
+                payment.getAmount(), payment.getCurrency());
+    }
 }
