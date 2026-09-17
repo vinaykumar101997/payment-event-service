@@ -36,12 +36,19 @@ public class PaymentService {
     /**
      * Called from the REST layer. Persists the payment in RECEIVED state; the caller is
      * responsible for publishing it to the "payments" topic afterward.
+     *
+     * saveAndFlush, not save: a plain save() only queues the INSERT in the persistence
+     * context - Hibernate wouldn't actually execute it (and surface a constraint
+     * violation) until the transaction commits, which happens *after* this method
+     * returns, well outside this try/catch. Flushing immediately forces the INSERT (and
+     * any duplicate-key violation) to happen right here, where it can still be translated
+     * into DuplicatePaymentException instead of escaping as an unhandled 500 later.
      */
     @Transactional
     public Payment createPayment(String paymentId, String fromAccount, String toAccount,
                                   BigDecimal amount, String currency) {
         try {
-            return paymentRepository.save(new Payment(paymentId, fromAccount, toAccount, amount, currency));
+            return paymentRepository.saveAndFlush(new Payment(paymentId, fromAccount, toAccount, amount, currency));
         } catch (DataIntegrityViolationException ex) {
             throw new DuplicatePaymentException(paymentId);
         }

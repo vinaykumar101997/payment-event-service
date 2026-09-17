@@ -5,14 +5,29 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
+import jakarta.persistence.PostLoad;
+import jakarta.persistence.PostPersist;
 import jakarta.persistence.Table;
+import jakarta.persistence.Transient;
+import org.springframework.data.domain.Persistable;
 
 import java.math.BigDecimal;
 import java.time.Instant;
 
+/**
+ * Implements Persistable because paymentId is a manually-assigned identifier, not
+ * @GeneratedValue. Spring Data's default isNew() check (getId() == null) would see a
+ * non-null id on every freshly-constructed Payment and route save() through merge()
+ * instead of persist() - and merge() on an assigned id it can't find just inserts it
+ * silently, meaning a genuine duplicate paymentId would UPDATE the existing row instead
+ * of throwing the constraint violation createPayment() relies on to detect it. The
+ * isNew field defaults to true for anything built via the constructor and flips to false
+ * once Hibernate has actually persisted or loaded the row, so save() only ever inserts a
+ * truly new payment and merges an existing one.
+ */
 @Entity
 @Table(name = "payments")
-public class Payment {
+public class Payment implements Persistable<String> {
 
     @Id
     @Column(name = "payment_id")
@@ -46,6 +61,9 @@ public class Payment {
     @Column(name = "last_swept_at")
     private Instant lastSweptAt;
 
+    @Transient
+    private boolean isNew = true;
+
     protected Payment() {
         // required by JPA
     }
@@ -62,6 +80,22 @@ public class Payment {
 
     public String getPaymentId() {
         return paymentId;
+    }
+
+    @Override
+    public String getId() {
+        return paymentId;
+    }
+
+    @Override
+    public boolean isNew() {
+        return isNew;
+    }
+
+    @PostLoad
+    @PostPersist
+    void markNotNew() {
+        this.isNew = false;
     }
 
     public String getFromAccount() {

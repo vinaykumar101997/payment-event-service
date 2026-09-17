@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      # ubuntu-latest ships Docker preinstalled and running, so Testcontainers works
+      # here with no extra setup - no `services:` block needed, unlike a job that talks
+      # to a fixed Postgres/Kafka container instead of spinning up its own per test class.
+      - name: Build and test (unit + Testcontainers integration)
+        run: ./mvnw -B verify
