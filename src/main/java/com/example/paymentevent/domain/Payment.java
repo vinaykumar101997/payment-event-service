@@ -12,7 +12,11 @@ import jakarta.persistence.Transient;
 import org.springframework.data.domain.Persistable;
 
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
+import java.util.HexFormat;
 
 /**
  * Implements Persistable because paymentId is a manually-assigned identifier, not
@@ -61,6 +65,12 @@ public class Payment implements Persistable<String> {
     @Column(name = "last_swept_at")
     private Instant lastSweptAt;
 
+    @Column(name = "processing_attempts", nullable = false)
+    private int processingAttempts;
+
+    @Column(name = "request_hash", updatable = false)
+    private String requestHash;
+
     @Transient
     private boolean isNew = true;
 
@@ -76,6 +86,37 @@ public class Payment implements Persistable<String> {
         this.currency = currency;
         this.status = PaymentStatus.RECEIVED;
         this.createdAt = Instant.now();
+        this.requestHash = requestHashOf(paymentId, fromAccount, toAccount, amount, currency);
+    }
+
+    /**
+     * Fingerprint of a create-payment request, used to tell an idempotent replay (same hash)
+     * from a different request reusing the same paymentId. The amount is normalized with
+     * stripTrailingZeros so 100, 100.0 and 100.00 - the same money - hash the same. Fields
+     * are joined with a control character that can't appear in a validated request, so no
+     * two different field combinations can produce the same input string.
+     */
+    public static String requestHashOf(String paymentId, String fromAccount, String toAccount,
+                                       BigDecimal amount, String currency) {
+        String canonical = String.join("\u001F", paymentId, fromAccount, toAccount,
+                amount.stripTrailingZeros().toPlainString(), currency);
+        try {
+            MessageDigest sha256 = MessageDigest.getInstance("SHA-256");
+            return HexFormat.of().formatHex(sha256.digest(canonical.getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 is required by every Java platform", e);
+        }
+    }
+
+    /**
+     * Rows created before request_hash existed have none stored; their hash is recomputed
+     * from the stored columns, which hold every field the hash covers.
+     */
+    public boolean matchesRequestHash(String candidateHash) {
+        String stored = requestHash != null
+                ? requestHash
+                : requestHashOf(paymentId, fromAccount, toAccount, amount, currency);
+        return stored.equals(candidateHash);
     }
 
     public String getPaymentId() {
@@ -147,5 +188,14 @@ public class Payment implements Persistable<String> {
 
     public void markSwept() {
         this.lastSweptAt = Instant.now();
+    }
+
+    public String getRequestHash() {
+        return requestHash;
+    }
+
+    /** Failed non-business processing attempts so far (see PaymentService.recordFailedAttempt). */
+    public int getProcessingAttempts() {
+        return processingAttempts;
     }
 }
