@@ -4,7 +4,7 @@ services:
     environment:
       POSTGRES_DB: payments
       POSTGRES_USER: payments
-      POSTGRES_PASSWORD: payments
+      POSTGRES_PASSWORD: local-dev-only-not-a-secret
     ports:
       - "5432:5432"
     volumes:
@@ -53,7 +53,7 @@ services:
       DB_PORT: 5432
       DB_NAME: payments
       DB_USER: payments
-      DB_PASSWORD: payments
+      DB_PASSWORD: local-dev-only-not-a-secret
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
     depends_on:
       postgres:

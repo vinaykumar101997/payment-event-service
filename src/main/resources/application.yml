@@ -5,7 +5,7 @@ spring:
   datasource:
     url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:payments}
     username: ${DB_USER:payments}
-    password: ${DB_PASSWORD:payments}
+    password: ${DB_PASSWORD}
 
   jpa:
     hibernate:

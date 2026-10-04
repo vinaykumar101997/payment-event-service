@@ -5,3 +5,8 @@ target/
 .vscode/
 .DS_Store
 *.log
+.env
+
+INTERVIEW_NOTES.md
+.claude/
+CLAUDE.md
