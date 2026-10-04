@@ -170,3 +170,13 @@ Postgres round trip, including:
   a key and partition. Adding such events would need per-key ordering in the relay (e.g.
   don't claim a row while an older row with the same key is still pending) or consumers that
   order by a sequence number.
+
+## Roadmap
+
+- ISO 20022: accept pacs.008, return pacs.002 status reports, generate camt.053 statements from the ledger
+- Fraud check before money moves, with a HELD state and release/reject endpoints
+- Reversals using compensating ledger entries
+- Metrics (Micrometer/Prometheus), OpenTelemetry tracing, paymentId as a correlation id
+- Load and chaos tests: k6 throughput and p95/p99, consumer killed mid-payment
+- API authentication
+- Smaller items: per-currency maximum amounts, lock timeouts not counting toward the poison limit, Flyway migrations exempt from the statement timeout
