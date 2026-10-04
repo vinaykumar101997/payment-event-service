@@ -25,6 +25,13 @@ public class Account {
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
+    /**
+     * Balance before any ledger entry. Never changes after creation; reconciliation checks
+     * balance == openingBalance + sum(ledger entries for this account).
+     */
+    @Column(name = "opening_balance", nullable = false, updatable = false)
+    private BigDecimal openingBalance;
+
     protected Account() {
         // required by JPA
     }
@@ -32,6 +39,7 @@ public class Account {
     public Account(String id, BigDecimal balance, String currency) {
         this.id = id;
         this.balance = balance;
+        this.openingBalance = balance;
         this.currency = currency;
         this.createdAt = Instant.now();
     }
@@ -58,5 +66,9 @@ public class Account {
 
     public Instant getCreatedAt() {
         return createdAt;
+    }
+
+    public BigDecimal getOpeningBalance() {
+        return openingBalance;
     }
 }
