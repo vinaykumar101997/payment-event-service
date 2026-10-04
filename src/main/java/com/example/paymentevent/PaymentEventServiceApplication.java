@@ -5,7 +5,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
 /**
- * @EnableScheduling activates PaymentSweeper's @Scheduled method.
+ * @EnableScheduling activates the @Scheduled methods of OutboxRelay and PaymentSweeper.
  */
 @SpringBootApplication
 @EnableScheduling

@@ -4,9 +4,9 @@ import java.math.BigDecimal;
 import java.time.Instant;
 
 /**
- * Message contract for the "transactions" topic: published after a payment has been
- * successfully debited/credited. Delivery is at-least-once (see PaymentProcessingResult's
- * ALREADY_PROCESSED case) — consumers of this topic must dedupe by paymentId.
+ * Message contract for the "transactions" topic: written to the outbox in the same
+ * transaction that debits/credits the payment, then published by OutboxRelay. Delivery is
+ * at-least-once (see OutboxRelay) — consumers of this topic must dedupe by paymentId.
  */
 public record TransactionEvent(
         String paymentId,

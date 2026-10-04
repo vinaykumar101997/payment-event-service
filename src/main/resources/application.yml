@@ -6,6 +6,14 @@ spring:
     url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:payments}
     username: ${DB_USER:payments}
     password: ${DB_PASSWORD}
+    hikari:
+      data-source-properties:
+        # Postgres session settings for every pooled connection (pgjdbc "options" parameter).
+        # lock_timeout: a SELECT ... FOR UPDATE on a row someone else holds fails after this
+        # instead of waiting forever; normal hold times are milliseconds, so 5s means something
+        # is stuck. The consumer treats the failure as retryable. statement_timeout: upper bound
+        # on any single statement. Both also apply to Flyway, which uses this datasource.
+        options: "-c lock_timeout=${DB_LOCK_TIMEOUT:5s} -c statement_timeout=${DB_STATEMENT_TIMEOUT:30s}"
 
   jpa:
     hibernate:
@@ -25,6 +33,11 @@ spring:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
       acks: all
+      properties:
+        # send() blocks up to this long fetching metadata when the broker is unreachable
+        # (default 60s). OutboxRelay publishes inside its batch transaction, so bound it to
+        # the same order as PaymentProducer's 5s ack timeout.
+        max.block.ms: 5000
     consumer:
       group-id: payment-event-service
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
@@ -36,6 +49,30 @@ spring:
     listener:
       concurrency: 3
       ack-mode: RECORD
+
+  # OutboxRelay (every 500ms) and PaymentSweeper (every 30s) are both @Scheduled; Spring's
+  # default single scheduler thread would let a slow sweep delay the relay.
+  task:
+    scheduling:
+      pool:
+        size: 2
+
+payments:
+  # Largest amount a single payment may move (any currency; see MoneyRules).
+  max-amount: 1000000.00
+  processing:
+    # Failed non-business processing attempts before a payment is moved to POISONED.
+    max-attempts: 10
+  sweeper:
+    interval-ms: 30000
+
+outbox:
+  relay:
+    poll-interval-ms: 500
+    # Cap on the exponential retry backoff for an outbox row whose publish keeps failing.
+    max-backoff-ms: 30000
+    # Failed publishes before a row is marked dead (~25 minutes at the 30s backoff cap).
+    max-attempts: 50
 
 server:
   port: 8080

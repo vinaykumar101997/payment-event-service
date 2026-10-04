@@ -7,6 +7,8 @@ import com.example.paymentevent.domain.Payment;
 import com.example.paymentevent.domain.PaymentStatus;
 import com.example.paymentevent.repository.AccountRepository;
 import com.example.paymentevent.repository.PaymentRepository;
+import com.example.paymentevent.service.ReconciliationReport;
+import com.example.paymentevent.service.ReconciliationService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.web.client.TestRestTemplate;
@@ -37,6 +39,9 @@ class ConcurrencyIT extends AbstractIntegrationTest {
     @Autowired
     private PaymentRepository paymentRepository;
 
+    @Autowired
+    private ReconciliationService reconciliationService;
+
     /**
      * Balance only covers 60 of the 100 payments. Every debit is validated for sufficient
      * funds under the same pessimistic lock it's applied with, so the outcome should be
@@ -65,6 +70,8 @@ class ConcurrencyIT extends AbstractIntegrationTest {
 
         assertThat(accountRepository.findById(dest.getId()).orElseThrow().getBalance())
                 .isEqualByComparingTo("600.00");
+
+        assertLedgerReconciles();
     }
 
     /**
@@ -109,6 +116,19 @@ class ConcurrencyIT extends AbstractIntegrationTest {
         BigDecimal totalAfter = accountRepository.findById(a.getId()).orElseThrow().getBalance()
                 .add(accountRepository.findById(b.getId()).orElseThrow().getBalance());
         assertThat(totalAfter).isEqualByComparingTo(totalBefore);
+
+        assertLedgerReconciles();
+    }
+
+    /**
+     * Double-entry invariants over the whole ledger, not just this test's accounts: every
+     * payment's entries sum to zero, and every account's balance equals its opening balance
+     * plus its entries. A balance change with no matching entries (or vice versa) fails here.
+     */
+    private void assertLedgerReconciles() {
+        ReconciliationReport report = reconciliationService.reconcile();
+        assertThat(report.unbalancedPayments()).isEmpty();
+        assertThat(report.accountDiscrepancies()).isEmpty();
     }
 
     private List<String> fireConcurrentPayments(String fromAccount, String toAccount, int count)

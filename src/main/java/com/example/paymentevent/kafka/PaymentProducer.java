@@ -9,15 +9,9 @@ import java.util.concurrent.TimeoutException;
 
 /**
  * Both methods block until the broker acknowledges (or a bounded timeout elapses) and
- * throw KafkaPublishException on failure, rather than firing-and-forgetting. This matters
- * for two different reasons depending on the caller:
- *  - PaymentConsumer publishes to "transactions" only after PaymentService.process() has
- *    committed; if that publish fails, we need the exception to propagate synchronously so
- *    Kafka's error handler retries the whole listener invocation instead of silently
- *    dropping the notification while the offset still gets committed.
- *  - The REST controller publishes to "payments" after createPayment() commits; a failure
- *    there is caught and logged rather than failing the request, since the Payment row is
- *    already durably persisted and the sweeper (see PaymentSweeper) will republish it.
+ * throw KafkaPublishException on failure, rather than firing-and-forgetting. The main caller
+ * is OutboxRelay, which marks an outbox row published only once this returns - a
+ * fire-and-forget send would let it mark rows published that the broker never received.
  */
 @Component
 public class PaymentProducer {
@@ -36,6 +30,10 @@ public class PaymentProducer {
 
     public void publishTransactionEvent(TransactionEvent event) {
         send("transactions", event.paymentId(), event);
+    }
+
+    public void publishPaymentFailedEvent(PaymentFailedEvent event) {
+        send("payment.failed", event.paymentId(), event);
     }
 
     private void send(String topic, String key, Object value) {

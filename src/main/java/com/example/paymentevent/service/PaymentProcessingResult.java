@@ -1,35 +1,35 @@
 package com.example.paymentevent.service;
 
-import com.example.paymentevent.kafka.TransactionEvent;
-
 /**
- * Outcome of PaymentService.process(), reported back to the Kafka listener so it knows
- * whether to publish to "transactions" once this method's transaction has committed.
- * PROCESSED_NOW and ALREADY_PROCESSED both publish (ALREADY_PROCESSED handles the case
- * where a prior attempt committed the debit/credit but the listener died before
- * publishing — redelivery lets us safely retry just the publish step).
+ * Outcome of PaymentService.process(). Informational only: the "transactions" event for a
+ * processed payment is written to the outbox inside process()'s own transaction, so the
+ * listener has nothing left to publish in any outcome. ALREADY_PROCESSED (a redelivery of
+ * a payment that already committed) therefore needs no special handling any more - its
+ * event was enqueued by the original processing transaction.
  */
-public record PaymentProcessingResult(Outcome outcome, TransactionEvent transactionEvent) {
+public record PaymentProcessingResult(Outcome outcome) {
 
     public enum Outcome {
         PROCESSED_NOW,
+        /** A business rule rejected it (funds, currency, account): marked FAILED, payment.failed enqueued. */
+        FAILED,
         ALREADY_PROCESSED,
         SKIPPED
     }
 
-    public static PaymentProcessingResult processedNow(TransactionEvent event) {
-        return new PaymentProcessingResult(Outcome.PROCESSED_NOW, event);
+    public static PaymentProcessingResult processedNow() {
+        return new PaymentProcessingResult(Outcome.PROCESSED_NOW);
     }
 
-    public static PaymentProcessingResult alreadyProcessed(TransactionEvent event) {
-        return new PaymentProcessingResult(Outcome.ALREADY_PROCESSED, event);
+    public static PaymentProcessingResult failed() {
+        return new PaymentProcessingResult(Outcome.FAILED);
+    }
+
+    public static PaymentProcessingResult alreadyProcessed() {
+        return new PaymentProcessingResult(Outcome.ALREADY_PROCESSED);
     }
 
     public static PaymentProcessingResult skipped() {
-        return new PaymentProcessingResult(Outcome.SKIPPED, null);
-    }
-
-    public boolean requiresTransactionPublish() {
-        return outcome == Outcome.PROCESSED_NOW || outcome == Outcome.ALREADY_PROCESSED;
+        return new PaymentProcessingResult(Outcome.SKIPPED);
     }
 }
