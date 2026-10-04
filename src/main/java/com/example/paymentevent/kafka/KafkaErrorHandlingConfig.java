@@ -1,5 +1,6 @@
 package com.example.paymentevent.kafka;
 
+import com.example.paymentevent.exception.PaymentPoisonedException;
 import com.example.paymentevent.exception.PaymentValidationException;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.common.TopicPartition;
@@ -15,12 +16,16 @@ import org.springframework.util.backoff.ExponentialBackOff;
  * autoconfiguration picks up this DefaultErrorHandler bean automatically and applies it
  * to the listener container factory - no further wiring needed.
  *
- * Two failure classes reach here (see PaymentService.process()):
- *  - PaymentValidationException (insufficient funds, unknown account, currency mismatch):
- *    registered as non-retryable, so it skips the backoff entirely and goes straight to
- *    the recoverer. Retrying a business-rule failure wastes time; the outcome won't change.
+ * Business-rule failures (insufficient funds, unknown account, currency mismatch) never get
+ * here: PaymentService.process() marks the payment FAILED, publishes payment.failed via the
+ * outbox, and returns normally. The DLT is only for real faults and poison messages:
+ *  - PaymentEventMismatchException (a PaymentValidationException: the event disagrees with
+ *    the stored row): registered as non-retryable, so it skips the backoff entirely and goes
+ *    straight to the recoverer. Retrying won't make the event trustworthy.
  *  - Anything else (DB connectivity blips, etc.): retried with exponential backoff, then
- *    recovered to the DLT if still failing.
+ *    recovered to the DLT if still failing. Each such failure also counts toward the
+ *    payment's attempt limit (PaymentConsumer); the attempt that exhausts it throws
+ *    PaymentPoisonedException, which is non-retryable and goes straight to the DLT.
  *  - A malformed/undeserializable message (poison pill) is also handled here: it arrives
  *    wrapped as a DeserializationException by ErrorHandlingDeserializer (application.yml),
  *    which Spring Kafka treats as inherently non-retryable for the same reason as above.
@@ -37,7 +42,7 @@ public class KafkaErrorHandlingConfig {
         backOff.setMaxElapsedTime(10_000L);
 
         DefaultErrorHandler handler = new DefaultErrorHandler(recoverer, backOff);
-        handler.addNotRetryableExceptions(PaymentValidationException.class);
+        handler.addNotRetryableExceptions(PaymentValidationException.class, PaymentPoisonedException.class);
         return handler;
     }
 }

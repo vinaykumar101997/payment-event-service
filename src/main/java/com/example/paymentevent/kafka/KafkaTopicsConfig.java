@@ -32,4 +32,9 @@ public class KafkaTopicsConfig {
     public NewTopic transactionsTopic() {
         return TopicBuilder.name("transactions").partitions(3).replicas(1).build();
     }
+
+    @Bean
+    public NewTopic paymentFailedTopic() {
+        return TopicBuilder.name("payment.failed").partitions(3).replicas(1).build();
+    }
 }
