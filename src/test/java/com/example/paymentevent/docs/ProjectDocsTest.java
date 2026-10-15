@@ -123,6 +123,21 @@ class ProjectDocsTest {
         assertThat(walkthrough).contains("\"verdict\":\"CLEAR\"", "\"verdict\":\"FLAG\"", "/release", "/reject");
     }
 
+    /**
+     * T11: Known limitations says the officer name is self-asserted under a shared key, so
+     * decisions are not individually authenticated, and what a real system would use.
+     */
+    @Test
+    void readmeKnownLimitationsExplainSelfAssertedOfficers() throws IOException {
+        String readme = read("README.md");
+        int start = readme.indexOf("## Known limitations");
+        int end = readme.indexOf("\n## ", start + 1);
+        String limitations = readme.substring(start, end < 0 ? readme.length() : end);
+
+        assertThat(limitations).contains("self-asserted", "not individually authenticated",
+                "OpenID Connect", "sub", "four-eyes");
+    }
+
     private static String read(String path) throws IOException {
         return Files.readString(Path.of(path), StandardCharsets.UTF_8);
     }
