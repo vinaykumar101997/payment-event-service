@@ -18,9 +18,14 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import org.springframework.transaction.support.TransactionTemplate;
+
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
@@ -57,6 +62,9 @@ class PoisonPaymentIT extends AbstractIntegrationTest {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private TransactionTemplate transactionTemplate;
 
     @BeforeEach
     void installPoisonTrigger() {
@@ -123,6 +131,59 @@ class PoisonPaymentIT extends AbstractIntegrationTest {
                 assertThat(paymentRepository.findById(paymentId).orElseThrow().getStatus())
                         .isEqualTo(PaymentStatus.FAILED));
         assertThat(paymentRepository.findById(paymentId).orElseThrow().getProcessingAttempts()).isZero();
+    }
+
+    /**
+     * Another transaction holds the source account's row lock through every Kafka retry of
+     * the message (5 attempts, each failing on the 5s lock_timeout, then the DLT) - more lock
+     * timeouts than max-attempts (3 in tests). That is a busy account, not a poison payment:
+     * it must stay RECEIVED with no attempts counted, and the sweeper must still be able to
+     * process it once the lock is released.
+     */
+    @Test
+    void paymentThatOnlyHitsLockTimeoutsIsNeverPoisoned() throws Exception {
+        Account from = accountRepository.save(new Account(id("SRC"), new BigDecimal("1000.00"), "USD"));
+        Account to = accountRepository.save(new Account(id("DST"), new BigDecimal("0.00"), "USD"));
+        String paymentId = id("PAY");
+        CountDownLatch lockHeld = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+
+        // FOR NO KEY UPDATE, not FOR UPDATE: it blocks the consumer's FOR UPDATE on the account
+        // but not the FOR KEY SHARE lock the payments insert takes for its foreign key, so the
+        // POST itself still succeeds.
+        CompletableFuture<Void> holder = CompletableFuture.runAsync(() -> transactionTemplate.executeWithoutResult(status -> {
+            jdbcTemplate.queryForObject("SELECT id FROM accounts WHERE id = ? FOR NO KEY UPDATE", String.class, from.getId());
+            lockHeld.countDown();
+            try {
+                release.await(120, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }));
+        try {
+            assertThat(lockHeld.await(10, TimeUnit.SECONDS)).isTrue();
+            restTemplate.postForEntity("/payments",
+                    new PaymentRequest(paymentId, from.getId(), to.getId(), new BigDecimal("100.00"), "USD"),
+                    PaymentResponse.class);
+
+            // On the DLT means Kafka has given up retrying: every attempt hit the held lock.
+            assertThat(observeRecordKey("payments.DLT", paymentId, Duration.ofSeconds(90))).isTrue();
+        } finally {
+            release.countDown();
+            holder.get(30, TimeUnit.SECONDS);
+        }
+
+        Payment payment = paymentRepository.findById(paymentId).orElseThrow();
+        assertThat(payment.getStatus()).isEqualTo(PaymentStatus.RECEIVED);
+        assertThat(payment.getProcessingAttempts()).isZero();
+
+        jdbcTemplate.update("UPDATE payments SET created_at = now() - interval '5 minutes' WHERE payment_id = ?",
+                paymentId);
+        paymentSweeper.sweep();
+        await().atMost(Duration.ofSeconds(15)).untilAsserted(() ->
+                assertThat(paymentRepository.findById(paymentId).orElseThrow().getStatus())
+                        .isEqualTo(PaymentStatus.PROCESSED));
+        assertThat(accountRepository.findById(from.getId()).orElseThrow().getBalance()).isEqualByComparingTo("900.00");
     }
 
     private static String id(String prefix) {
