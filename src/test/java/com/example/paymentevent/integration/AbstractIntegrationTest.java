@@ -61,6 +61,8 @@ public abstract class AbstractIntegrationTest {
         // Tests call PaymentSweeper.sweep() directly; a background sweep firing mid-test would
         // claim their stale payments first and make the outcome depend on timing.
         registry.add("payments.sweeper.interval-ms", () -> "3600000");
+        // Per-currency cap used by ApiProblemDetailsIT; every other currency keeps the default.
+        registry.add("payments.max-amount-by-currency.JPY", () -> "150000000");
     }
 
     /**

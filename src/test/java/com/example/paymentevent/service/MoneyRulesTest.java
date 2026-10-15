@@ -4,6 +4,7 @@ import com.example.paymentevent.exception.InvalidAmountException;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -73,6 +74,40 @@ class MoneyRulesTest {
         assertThatThrownBy(() -> strict.validate(new BigDecimal("50.01"), "USD"))
                 .isInstanceOf(InvalidAmountException.class)
                 .hasMessageContaining("exceeds the maximum of 50.00");
+    }
+
+    /**
+     * The same number is a modest JPY payment and a very large USD one, so one cap can't fit
+     * both: the per-currency map overrides the default for the currencies it names.
+     */
+    @Test
+    void sameAmountIsAcceptedInOneCurrencyAndRejectedInAnother() {
+        MoneyRules perCurrency = new MoneyRules(new BigDecimal("1000000.00"), Map.of("JPY", new BigDecimal("150000000")));
+
+        assertThatCode(() -> perCurrency.validate(new BigDecimal("5000000"), "JPY")).doesNotThrowAnyException();
+        assertThatThrownBy(() -> perCurrency.validate(new BigDecimal("5000000"), "USD"))
+                .isInstanceOf(InvalidAmountException.class)
+                .hasMessageContaining("exceeds the maximum of 1000000.00 USD");
+        assertThatThrownBy(() -> perCurrency.validate(new BigDecimal("150000001"), "JPY"))
+                .isInstanceOf(InvalidAmountException.class)
+                .hasMessageContaining("exceeds the maximum of 150000000 JPY");
+    }
+
+    /** Map keys are matched case-insensitively (environment variables arrive lower-cased). */
+    @Test
+    void perCurrencyKeysAreCaseInsensitive() {
+        MoneyRules perCurrency = new MoneyRules(new BigDecimal("100.00"), Map.of("jpy", new BigDecimal("10000")));
+
+        assertThatCode(() -> perCurrency.validate(new BigDecimal("10000"), "JPY")).doesNotThrowAnyException();
+    }
+
+    /** A typo in the configuration fails at start-up instead of silently using the default. */
+    @Test
+    void invalidPerCurrencyConfigurationIsRejectedAtConstruction() {
+        assertThatThrownBy(() -> new MoneyRules(new BigDecimal("100.00"), Map.of("XYZ", new BigDecimal("10"))))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("XYZ");
+        assertThatThrownBy(() -> new MoneyRules(new BigDecimal("100.00"), Map.of("USD", BigDecimal.ZERO)))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("USD");
     }
 
     private void assertAccepted(String amount, String currency) {

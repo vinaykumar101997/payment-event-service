@@ -58,8 +58,14 @@ spring:
         size: 2
 
 payments:
-  # Largest amount a single payment may move (any currency; see MoneyRules).
-  max-amount: 1000000.00
+  # Default largest amount a single payment may move, for any currency not listed in
+  # max-amount-by-currency (see MoneyRules). Quoted: unquoted, YAML reads it as a float and
+  # error messages would show "1000000.0".
+  max-amount: "1000000.00"
+  # Per-currency overrides, keyed by ISO 4217 code (payments.max-amount-by-currency.<CODE>).
+  # None are set by default, so every currency uses max-amount. Example:
+  #   max-amount-by-currency:
+  #     JPY: 150000000
   processing:
     # Failed non-business processing attempts before a payment is moved to POISONED.
     max-attempts: 10
