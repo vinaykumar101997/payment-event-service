@@ -40,7 +40,7 @@ What the integration tests prove, against real Postgres and Kafka:
 | A message whose amount disagrees with the saved payment | No money moves, the payment is failed for investigation |
 | Ledger reconciliation after concurrent workloads | Every payment nets to zero, every balance matches its entries |
 
-36 unit tests and 38 integration tests in total.
+47 unit tests and 42 integration tests in total (see Verification).
 
 ## Design decisions
 
@@ -146,14 +146,16 @@ The integration tests start real Postgres and Kafka containers once per test run
 
 ## Verification
 
-Last full run: 2026-10-15, `./mvnw -B clean verify` on a clean checkout of `main` (commit 964449f), Windows 11, JDK 17.0.12, Docker 29.8.1:
+Last full run: 2026-10-15, `./mvnw -B clean verify` on branch `fix/payment-stage1` (commit a59c99c), Windows 11, JDK 17.0.12, Docker 29.8.1:
 
 ```
-[INFO] Tests run: 36, Failures: 0, Errors: 0, Skipped: 0   (unit, surefire)
-[INFO] Tests run: 38, Failures: 0, Errors: 0, Skipped: 0   (integration, failsafe)
+[INFO] Tests run: 47, Failures: 0, Errors: 0, Skipped: 0   (unit, surefire)
+[INFO] Tests run: 42, Failures: 0, Errors: 0, Skipped: 0   (integration, failsafe)
 [INFO] BUILD SUCCESS
-[INFO] Total time:  02:38 min
+[INFO] Total time:  03:25 min
 ```
+
+Before Stage 1, the same command on a clean checkout of `main` (commit 964449f) gave 36 unit and 38 integration tests, 0 failures, in 02:38 min.
 
 The badge above shows the latest GitHub Actions run of the same command.
 
