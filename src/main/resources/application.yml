@@ -61,12 +61,12 @@ spring:
       concurrency: 3
       ack-mode: RECORD
 
-  # OutboxRelay (every 500ms) and PaymentSweeper (every 30s) are both @Scheduled; Spring's
-  # default single scheduler thread would let a slow sweep delay the relay.
+  # OutboxRelay (every 500ms), PaymentSweeper (every 30s) and OutboxRetentionJob (hourly) are
+  # all @Scheduled; one thread each, so a slow sweep or purge can't delay the relay.
   task:
     scheduling:
       pool:
-        size: 2
+        size: 3
 
 payments:
   # Default largest amount a single payment may move, for any currency not listed in
@@ -90,6 +90,12 @@ outbox:
     max-backoff-ms: 30000
     # Failed publishes before a row is marked dead (~25 minutes at the 30s backoff cap).
     max-attempts: 50
+  retention:
+    # Published rows older than this are deleted by OutboxRetentionJob. Dead and pending
+    # rows are never deleted.
+    days: 30
+    batch-size: 1000
+    interval-ms: 3600000
 
 server:
   port: 8080

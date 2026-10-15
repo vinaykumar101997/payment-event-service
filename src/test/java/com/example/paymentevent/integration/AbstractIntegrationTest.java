@@ -63,6 +63,8 @@ public abstract class AbstractIntegrationTest {
         registry.add("payments.sweeper.interval-ms", () -> "3600000");
         // Per-currency cap used by ApiProblemDetailsIT; every other currency keeps the default.
         registry.add("payments.max-amount-by-currency.JPY", () -> "150000000");
+        // Small batches so OutboxRetentionIT exercises several of them with a few hundred rows.
+        registry.add("outbox.retention.batch-size", () -> "50");
     }
 
     /**
