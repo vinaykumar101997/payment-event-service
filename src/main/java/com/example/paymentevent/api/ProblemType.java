@@ -13,7 +13,8 @@ public enum ProblemType {
     NOT_FOUND("not-found", "Resource not found"),
     DUPLICATE_PAYMENT("duplicate-payment", "Duplicate payment"),
     PAYMENT_ID_REUSED("payment-id-reused", "Payment id reused with a different payload"),
-    UNKNOWN_ACCOUNT("unknown-account", "Unknown account");
+    UNKNOWN_ACCOUNT("unknown-account", "Unknown account"),
+    SERVICE_BUSY("service-busy", "Service busy");
 
     private final String slug;
     private final String title;

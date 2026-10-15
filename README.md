@@ -51,7 +51,7 @@ What the integration tests prove, against real Postgres and Kafka:
 *Technical:* after claiming, `process()` uses only the stored row. If the message disagrees with it, the payment fails and the message goes to the dead-letter topic.
 
 **One payment at a time per account.** When two payments reach the same account together, one waits for the other, so every balance check is accurate.
-*Technical:* both accounts are locked with `SELECT ... FOR UPDATE`, always in sorted order so opposite transfers can't deadlock. Validation happens after the lock is taken, never before.
+*Technical:* both accounts are locked with a JPA pessimistic write lock, which Hibernate sends to Postgres as `SELECT ... FOR NO KEY UPDATE`, always in sorted order so opposite transfers can't deadlock. Validation happens after the lock is taken, never before. `FOR NO KEY UPDATE` (rather than `FOR UPDATE`) leaves the foreign-key check of a new payment for the same account unblocked.
 
 **Books that always balance.** Every transfer writes a matching debit and credit, and a reconciliation check confirms the totals line up. The database itself refuses a negative balance.
 *Technical:* `ledger_entries` are written in the same transaction as the balance change. CHECK constraints enforce `balance >= 0`, `amount > 0` and different source and destination accounts.
@@ -167,7 +167,7 @@ The badge above shows the latest GitHub Actions run of the same command.
 | GET | `/payments/{id}` | Payment status and failure reason |
 | GET | `/accounts/{id}` | Account balance |
 
-Errors are `application/problem+json`: 400 `validation-failed`, `malformed-request`, `invalid-request`, `invalid-amount`; 404 `not-found`; 409 `duplicate-payment` (includes the existing payment); 422 `unknown-account`, `payment-id-reused`.
+Errors are `application/problem+json`: 400 `validation-failed`, `malformed-request`, `invalid-request`, `invalid-amount`; 404 `not-found`; 409 `duplicate-payment` (includes the existing payment); 422 `unknown-account`, `payment-id-reused`; 503 `service-busy` (with `Retry-After`).
 
 Each problem `type` is `payments.problem-base-uri` + the slug. By default that resolves to the matching section of [docs/problems.md](docs/problems.md) (for example `https://github.com/vinaykumar101997/payment-event-service/blob/main/docs/problems.md#invalid-amount`), which gives the status, when it occurs, an example body and what the client should do. Set `PAYMENTS_PROBLEM_BASE_URI` to publish them elsewhere. **Change:** `type` values used to be `https://example.com/problems/<slug>`; clients that matched on those must switch to the new URIs. There are no known clients.
 
@@ -175,7 +175,7 @@ Each problem `type` is `payments.problem-base-uri` + the slug. By default that r
 
 - **The sweeper is a safety net, not the main delivery path.** If processing keeps failing with a retryable error for longer than the consumer's retries, the message goes to the dead-letter topic and the payment stays RECEIVED. The sweeper re-enqueues such payments after 60 seconds.
 - **A payment on a permanently locked account never finishes and is never poisoned.** A lock timeout (Postgres `lock_timeout`, SQLState 55P03) is retried but not counted toward the poison limit, so a busy account can't push a valid payment to POISONED. The flip side: if the account stays locked, the payment cycles through Kafka retries, the dead-letter topic and the sweeper until the lock is released. Each lock timeout is logged.
-- **Creating a payment can wait on an account that is being processed.** The consumer locks accounts with `FOR UPDATE`, which also blocks the foreign key check of a new `POST /payments` for the same account. Normally that is milliseconds; if it exceeds `lock_timeout`, the POST fails with a generic 500 rather than a problem-details response.
+- **A payment can't be created while something else holds one of its accounts `FOR UPDATE`.** Inserting a payment checks its foreign keys, which needs a `FOR KEY SHARE` lock on both accounts; only `FOR UPDATE` blocks that. The service itself never takes `FOR UPDATE` on accounts (payment processing uses `FOR NO KEY UPDATE`), but a script or manual `SELECT ... FOR UPDATE` can. If the wait passes `lock_timeout`, the POST returns 503 `service-busy` with `Retry-After: 1`, and the client retries with the same `paymentId`.
 - **Outbox retention deletes, it does not archive.** Published outbox rows older than `outbox.retention.days` (default 30) are deleted hourly in batches; dead and pending rows are kept. There is no archive, so the audit trail in `outbox_events` only goes back that far.
 - **Limits are per payment and change only on restart.** `payments.max-amount-by-currency` sets a cap per currency (falling back to `payments.max-amount`). There are no per-account or per-day limits.
 - **Migrations have no statement timeout.** Flyway runs on its own connection without `statement_timeout` (it keeps `lock_timeout`), so a runaway migration is stopped only by a lock timeout or an operator.

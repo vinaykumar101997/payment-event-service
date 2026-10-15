@@ -7,6 +7,7 @@ import com.example.paymentevent.domain.PaymentStatus;
 import com.example.paymentevent.exception.DuplicatePaymentException;
 import com.example.paymentevent.exception.InvalidAmountException;
 import com.example.paymentevent.exception.PaymentValidationException;
+import com.example.paymentevent.exception.ServiceBusyException;
 import com.example.paymentevent.kafka.PaymentEvent;
 import com.example.paymentevent.kafka.PaymentFailedEvent;
 import com.example.paymentevent.kafka.TransactionEvent;
@@ -22,6 +23,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.PessimisticLockingFailureException;
 
 import java.math.BigDecimal;
 import java.sql.SQLException;
@@ -369,6 +371,34 @@ class PaymentServiceTest {
         // Still thrown (it's a fault, so the message goes to the DLT), but the payment's
         // FAILED outcome is announced like any other.
         assertThat(capturePaymentFailedEvent().reason()).contains("does not match");
+    }
+
+    /**
+     * The insert's foreign-key check waited past lock_timeout (SQLState 55P03) on an account
+     * row someone holds FOR UPDATE: the request is fine, the account is busy. It becomes a
+     * retryable 503 (ServiceBusyException), and nothing is enqueued.
+     */
+    @Test
+    void createPaymentTranslatesLockTimeoutToServiceBusy() {
+        PessimisticLockingFailureException lockTimeout = new PessimisticLockingFailureException("could not execute statement",
+                new SQLException("canceling statement due to lock timeout", "55P03"));
+        when(paymentRepository.saveAndFlush(any(Payment.class))).thenThrow(lockTimeout);
+
+        assertThatThrownBy(() -> paymentService.createPayment("p1", "acc-a", "acc-b", new BigDecimal("50.00"), "USD"))
+                .isInstanceOf(ServiceBusyException.class)
+                .hasCause(lockTimeout);
+        verifyNoInteractions(outboxWriter);
+    }
+
+    /** Other locking failures (here a statement timeout, 57014) are not "busy" and pass through unchanged. */
+    @Test
+    void createPaymentRethrowsOtherLockingFailuresUnchanged() {
+        PessimisticLockingFailureException statementTimeout = new PessimisticLockingFailureException("query canceled",
+                new SQLException("canceling statement due to statement timeout", "57014"));
+        when(paymentRepository.saveAndFlush(any(Payment.class))).thenThrow(statementTimeout);
+
+        assertThatThrownBy(() -> paymentService.createPayment("p1", "acc-a", "acc-b", new BigDecimal("50.00"), "USD"))
+                .isSameAs(statementTimeout);
     }
 
     private static DataIntegrityViolationException constraintViolation(String sqlState, String constraintName) {

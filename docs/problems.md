@@ -192,3 +192,27 @@ In the examples, `{base}` stands for the configured base URI.
   ```
 
 - **What the client should do:** check the account ids. Do not retry unchanged.
+
+## service-busy
+
+- **HTTP status:** 503 Service Unavailable, with a `Retry-After: 1` header (seconds).
+- **When it occurs:** `POST /payments` could not insert the payment because one of its accounts
+  was locked by another database transaction for longer than the lock timeout (Postgres
+  `lock_timeout`, 5 seconds by default; SQLState 55P03). Normal payment processing does not
+  cause this; a long-running script or manual change holding the account row can. Nothing was
+  saved.
+- **Example response:**
+
+  ```json
+  {
+    "type": "{base}service-busy",
+    "title": "Service busy",
+    "status": 503,
+    "detail": "An account in this payment is busy; retry shortly",
+    "instance": "/payments"
+  }
+  ```
+
+- **What the client should do:** wait at least the `Retry-After` seconds and send the same
+  request again, with the same `paymentId`. It is safe: if an earlier attempt did get through,
+  the retry is answered with `duplicate-payment` (409) and the existing payment.

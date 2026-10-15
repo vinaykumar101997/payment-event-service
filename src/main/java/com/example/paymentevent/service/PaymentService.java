@@ -10,6 +10,7 @@ import com.example.paymentevent.exception.DuplicatePaymentException;
 import com.example.paymentevent.exception.InsufficientFundsException;
 import com.example.paymentevent.exception.PaymentEventMismatchException;
 import com.example.paymentevent.exception.PaymentValidationException;
+import com.example.paymentevent.exception.ServiceBusyException;
 import com.example.paymentevent.exception.UnknownAccountException;
 import com.example.paymentevent.kafka.PaymentEvent;
 import com.example.paymentevent.kafka.PaymentFailedEvent;
@@ -23,6 +24,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -41,6 +43,7 @@ public class PaymentService {
 
     private static final String UNIQUE_VIOLATION = "23505";
     private static final String FOREIGN_KEY_VIOLATION = "23503";
+    private static final String LOCK_NOT_AVAILABLE = "55P03";
     private static final int MAX_FAILURE_REASON_LENGTH = 500;
 
     private final PaymentRepository paymentRepository;
@@ -79,6 +82,12 @@ public class PaymentService {
      * foreign keys to accounts, so an unknown account fails the same INSERT. The SQLState
      * tells them apart (23505 unique_violation vs 23503 foreign_key_violation); anything
      * else is rethrown untouched rather than guessed at.
+     *
+     * The same foreign keys make the INSERT take FOR KEY SHARE on both account rows. That only
+     * conflicts with FOR UPDATE (the consumer's own lock is FOR NO KEY UPDATE, see
+     * AccountRepository), so it waits only on an outside FOR UPDATE - a script or manual fix.
+     * If that wait passes lock_timeout (55P03) the account is busy, not the request wrong: it
+     * becomes ServiceBusyException (503 with Retry-After) and the client can send it again.
      */
     @Transactional
     public Payment createPayment(String paymentId, String fromAccount, String toAccount,
@@ -95,6 +104,12 @@ public class PaymentService {
             }
             if (FOREIGN_KEY_VIOLATION.equals(sqlState)) {
                 throw unknownAccount(ex, fromAccount, toAccount);
+            }
+            throw ex;
+        } catch (PessimisticLockingFailureException ex) {
+            if (LOCK_NOT_AVAILABLE.equals(sqlStateOf(ex))) {
+                log.warn("Payment {} not created: an account row was locked past lock_timeout", paymentId);
+                throw new ServiceBusyException("An account in this payment is busy; retry shortly", ex);
             }
             throw ex;
         }

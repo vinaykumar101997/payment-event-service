@@ -5,6 +5,7 @@ import com.example.paymentevent.exception.InvalidAmountException;
 import com.example.paymentevent.exception.InvalidPaymentRequestException;
 import com.example.paymentevent.exception.PaymentIdReusedException;
 import com.example.paymentevent.exception.ResourceNotFoundException;
+import com.example.paymentevent.exception.ServiceBusyException;
 import com.example.paymentevent.exception.UnknownAccountException;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Value;
@@ -38,6 +39,7 @@ import java.util.Map;
  *  - 409 duplicate-payment  identical replay of an existing paymentId (with a "payment" member)
  *  - 422 payment-id-reused  existing paymentId, different payload
  *  - 422 unknown-account    fromAccount/toAccount doesn't exist
+ *  - 503 service-busy       an account row was locked past lock_timeout; retry (Retry-After header)
  * Extending ResponseEntityExceptionHandler also turns Spring MVC's own errors (405, 415,
  * unknown routes, ...) into problems, with type about:blank.
  *
@@ -47,6 +49,9 @@ import java.util.Map;
  */
 @RestControllerAdvice
 public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
+
+    /** A held row lock normally lasts milliseconds; one second is plenty before a retry. */
+    static final String RETRY_AFTER_SECONDS = "1";
 
     private final String problemBaseUri;
 
@@ -117,6 +122,15 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
     public ProblemDetail handleUnknownAccount(UnknownAccountException ex, HttpServletRequest request) {
         return problem(HttpStatus.UNPROCESSABLE_ENTITY, ProblemType.UNKNOWN_ACCOUNT, ex.getMessage(),
                 request.getRequestURI());
+    }
+
+    @ExceptionHandler(ServiceBusyException.class)
+    public ResponseEntity<ProblemDetail> handleServiceBusy(ServiceBusyException ex, HttpServletRequest request) {
+        ProblemDetail problem = problem(HttpStatus.SERVICE_UNAVAILABLE, ProblemType.SERVICE_BUSY, ex.getMessage(),
+                request.getRequestURI());
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .header(HttpHeaders.RETRY_AFTER, RETRY_AFTER_SECONDS)
+                .body(problem);
     }
 
     private ProblemDetail problem(HttpStatus status, ProblemType type, String detail, String path) {
