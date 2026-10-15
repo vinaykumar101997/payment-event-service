@@ -175,6 +175,26 @@ public class Payment implements Persistable<String> {
         this.status = PaymentStatus.HELD;
     }
 
+    /** HELD -> RECEIVED: screening cleared it (or an officer released it); normal processing follows. */
+    public void releaseFromHold() {
+        requireHeld("release");
+        this.status = PaymentStatus.RECEIVED;
+    }
+
+    /** HELD -> REJECTED (terminal): screening or an officer rejected it. No money moved. */
+    public void reject(String reason) {
+        requireHeld("reject");
+        this.status = PaymentStatus.REJECTED;
+        this.failureReason = reason;
+        this.processedAt = Instant.now();
+    }
+
+    private void requireHeld(String action) {
+        if (status != PaymentStatus.HELD) {
+            throw new IllegalStateException("Cannot " + action + " payment " + paymentId + " in status " + status);
+        }
+    }
+
     public void markProcessed() {
         this.status = PaymentStatus.PROCESSED;
         this.processedAt = Instant.now();

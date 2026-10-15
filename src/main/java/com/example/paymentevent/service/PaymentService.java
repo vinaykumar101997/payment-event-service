@@ -207,7 +207,7 @@ public class PaymentService {
             String reason = "Event does not match stored payment: " + mismatch;
             payment.markFailed(reason);
             paymentRepository.save(payment);
-            outboxWriter.enqueuePaymentFailedEvent(toPaymentFailedEvent(payment));
+            outboxWriter.enqueuePaymentFailedEvent(PaymentFailedEvent.from(payment));
             log.error("Payment {} rejected, no money moved: {}", paymentId, reason);
             throw new PaymentEventMismatchException(reason);
         }
@@ -219,7 +219,7 @@ public class PaymentService {
         } catch (PaymentValidationException ex) {
             payment.markFailed(ex.getMessage());
             paymentRepository.save(payment);
-            outboxWriter.enqueuePaymentFailedEvent(toPaymentFailedEvent(payment));
+            outboxWriter.enqueuePaymentFailedEvent(PaymentFailedEvent.from(payment));
             log.warn("Payment {} failed validation: {}", paymentId, ex.getMessage());
             return PaymentProcessingResult.failed();
         }
@@ -354,11 +354,6 @@ public class PaymentService {
     private TransactionEvent toTransactionEvent(Payment payment) {
         return new TransactionEvent(payment.getPaymentId(), payment.getFromAccount(), payment.getToAccount(),
                 payment.getAmount(), payment.getCurrency(), payment.getProcessedAt());
-    }
-
-    private PaymentFailedEvent toPaymentFailedEvent(Payment payment) {
-        return new PaymentFailedEvent(payment.getPaymentId(), payment.getFromAccount(), payment.getToAccount(),
-                payment.getAmount(), payment.getCurrency(), payment.getFailureReason(), payment.getProcessedAt());
     }
 
     private record AccountPair(Account from, Account to) {

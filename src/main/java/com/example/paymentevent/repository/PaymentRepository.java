@@ -1,12 +1,15 @@
 package com.example.paymentevent.repository;
 
 import com.example.paymentevent.domain.Payment;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.Instant;
+import java.util.Optional;
 
 public interface PaymentRepository extends JpaRepository<Payment, String> {
 
@@ -21,6 +24,15 @@ public interface PaymentRepository extends JpaRepository<Payment, String> {
     @Query("UPDATE Payment p SET p.status = com.example.paymentevent.domain.PaymentStatus.PROCESSING " +
            "WHERE p.paymentId = :paymentId AND p.status = com.example.paymentevent.domain.PaymentStatus.RECEIVED")
     int claimForProcessing(@Param("paymentId") String paymentId);
+
+    /**
+     * Loads a payment with a pessimistic write lock (FOR NO KEY UPDATE on Postgres, see
+     * AccountRepository), so a screening verdict and an officer decision for the same payment
+     * are applied one after the other, never both against the same HELD state.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT p FROM Payment p WHERE p.paymentId = :paymentId")
+    Optional<Payment> findByIdForUpdate(@Param("paymentId") String paymentId);
 
     /**
      * Counts one failed non-business processing attempt. Only while RECEIVED (the failed

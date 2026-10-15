@@ -169,15 +169,17 @@ Off by default (`payments.screening.enabled=false`); with it off, everything abo
 |---|---|---|---|---|
 | (new) | `POST /payments`, screening off | `RECEIVED` | outbox `payments` | yes |
 | (new) | `POST /payments`, screening on | `HELD` | outbox `payment.screening.requested` | yes (S2) |
-| `HELD` | verdict CLEAR | `RECEIVED` | outbox `payments` | not yet (S3) |
+| `HELD` | verdict CLEAR | `RECEIVED` | outbox `payments` | yes (S3) |
 | `HELD` | officer release | `RECEIVED` | outbox `payments` | not yet (S5) |
-| `HELD` | verdict FLAG or ERROR | `HELD` | none | not yet (S3) |
-| `HELD` | verdict REJECT | `REJECTED` | outbox `payment.failed` | not yet (S3) |
+| `HELD` | verdict FLAG or ERROR | `HELD` | none | yes (S3) |
+| `HELD` | verdict REJECT | `REJECTED` | outbox `payment.failed` | yes (S3) |
 | `HELD` | officer reject | `REJECTED` | outbox `payment.failed` | not yet (S5) |
 | `RECEIVED` | consumer claims it | `PROCESSING` | none | yes |
 | `PROCESSING` | money moved | `PROCESSED` | ledger entries, outbox `transactions` | yes |
 | `PROCESSING` | business rule failed (funds, currency, account), or the event doesn't match the stored row | `FAILED` | outbox `payment.failed` | yes |
 | `RECEIVED` | `payments.processing.max-attempts` non-business failures | `POISONED` | message to `payments.DLT` | yes |
+
+Every verdict event is stored in `screening_verdicts` (migration V9) under the key (paymentId, eventId), with what it did. A redelivered event changes nothing. A verdict for a payment that has already left `HELD` is stored as `IGNORED_NOT_HELD` and not applied, so a payment is never decided twice. A verdict that doesn't match the schema, or names an unknown payment, goes to `payment.screening.completed.DLT` unchanged and is never applied.
 
 `PROCESSED`, `FAILED`, `POISONED` and `REJECTED` are terminal. From `RECEIVED` on, a released payment follows exactly the same path as one created with screening off. Postgres also enforces the list of statuses (constraint `payments_status_known`, migration V8).
 
