@@ -15,7 +15,8 @@ public enum ProblemType {
     PAYMENT_ID_REUSED("payment-id-reused", "Payment id reused with a different payload"),
     UNKNOWN_ACCOUNT("unknown-account", "Unknown account"),
     SERVICE_BUSY("service-busy", "Service busy"),
-    PAYMENT_NOT_HELD("payment-not-held", "Payment not held");
+    PAYMENT_NOT_HELD("payment-not-held", "Payment not held"),
+    UNAUTHORIZED("unauthorized", "Unauthorized");
 
     private final String slug;
     private final String title;

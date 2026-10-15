@@ -30,6 +30,13 @@
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
 
+        <!-- Spring Security: X-API-Key authentication (security/ApiKeySecurityConfig).
+             Version managed by Spring Boot. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-security</artifactId>
+        </dependency>
+
         <!-- Spring Data JPA (Hibernate) for Account/Payment persistence -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

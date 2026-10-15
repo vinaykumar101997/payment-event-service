@@ -5,6 +5,8 @@ import com.example.paymentevent.exception.InvalidAmountException;
 import com.example.paymentevent.exception.InvalidPaymentRequestException;
 import com.example.paymentevent.exception.PaymentIdReusedException;
 import com.example.paymentevent.exception.PaymentNotHeldException;
+import com.example.paymentevent.security.ApiKeyAuthenticationFilter;
+import org.springframework.security.core.AuthenticationException;
 import com.example.paymentevent.exception.ResourceNotFoundException;
 import com.example.paymentevent.exception.ServiceBusyException;
 import com.example.paymentevent.exception.UnknownAccountException;
@@ -132,6 +134,16 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
                 request.getRequestURI());
         problem.setProperty("payment", PaymentResponse.from(ex.payment()));
         return problem;
+    }
+
+    /**
+     * Missing or wrong X-API-Key, handed over by the security chain's entry point
+     * (ApiKeySecurityConfig). The detail is the same for both, so it doesn't say which.
+     */
+    @ExceptionHandler(AuthenticationException.class)
+    public ProblemDetail handleUnauthorized(AuthenticationException ex, HttpServletRequest request) {
+        return problem(HttpStatus.UNAUTHORIZED, ProblemType.UNAUTHORIZED,
+                "Missing or invalid " + ApiKeyAuthenticationFilter.HEADER + " header", request.getRequestURI());
     }
 
     @ExceptionHandler(ServiceBusyException.class)

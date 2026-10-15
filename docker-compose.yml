@@ -55,6 +55,8 @@ services:
       DB_USER: payments
       DB_PASSWORD: local-dev-only-not-a-secret
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      # Taken from your shell; compose refuses to start the app without it. No key is stored here.
+      PAYMENTS_API_KEY: ${PAYMENTS_API_KEY:?set PAYMENTS_API_KEY to the API key clients must send}
     depends_on:
       postgres:
         condition: service_healthy

@@ -119,21 +119,22 @@ PaymentSweeper (every 30s): re-enqueues (via the outbox) anything still RECEIVED
 ## Running locally
 
 ```bash
+export PAYMENTS_API_KEY=$(openssl rand -hex 32)   # any value; clients must send it
 docker-compose up --build
 ```
 
-This starts Postgres, a single-node Kafka broker and the app on port 8080. Accounts `ACC-1001` and `ACC-1002` are created for you.
+This starts Postgres, a single-node Kafka broker and the app on port 8080. Accounts `ACC-1001` and `ACC-1002` are created for you. Compose refuses to start the app if `PAYMENTS_API_KEY` is not set; no key is stored in the repository.
 
 ```bash
-curl -X POST localhost:8080/payments -H "Content-Type: application/json" -d '{
+curl -X POST localhost:8080/payments -H "X-API-Key: $PAYMENTS_API_KEY" -H "Content-Type: application/json" -d '{
   "paymentId": "p-1", "fromAccount": "ACC-1001", "toAccount": "ACC-1002",
   "amount": 25.00, "currency": "USD"
 }'
-curl localhost:8080/payments/p-1
-curl localhost:8080/accounts/ACC-1001
+curl -H "X-API-Key: $PAYMENTS_API_KEY" localhost:8080/payments/p-1
+curl -H "X-API-Key: $PAYMENTS_API_KEY" localhost:8080/accounts/ACC-1001
 ```
 
-To run the app from your IDE instead, start Postgres and Kafka with docker-compose and set `DB_PASSWORD` (the compose file uses `local-dev-only-not-a-secret`).
+To run the app from your IDE instead, start Postgres and Kafka with docker-compose and set `DB_PASSWORD` (the compose file uses `local-dev-only-not-a-secret`) and `PAYMENTS_API_KEY`. The app does not start without `PAYMENTS_API_KEY`.
 
 ## Running tests
 
@@ -196,7 +197,9 @@ Officer decisions (migration V11) are stored once per payment with officer, note
 | POST | `/payments/{id}/release` | Officer releases a HELD payment. Body `{"officer": "...", "note": "..."}`, both required |
 | POST | `/payments/{id}/reject` | Officer rejects a HELD payment. Same body |
 
-Errors are `application/problem+json`: 400 `validation-failed`, `malformed-request`, `invalid-request`, `invalid-amount`; 404 `not-found`; 409 `duplicate-payment` (includes the existing payment), `payment-not-held` (officer decision on a payment that isn't HELD; includes it); 422 `unknown-account`, `payment-id-reused`; 503 `service-busy` (with `Retry-After`).
+Every request needs the header `X-API-Key` with the value of `PAYMENTS_API_KEY` (required, no default). The comparison is constant-time (SHA-256 digests compared with `MessageDigest.isEqual`). Only `/actuator/health` is left open; this build has no actuator, so that path returns 404, not 401.
+
+Errors are `application/problem+json`: 401 `unauthorized` (missing or wrong key; same answer for both); `validation-failed`, `malformed-request`, `invalid-request`, `invalid-amount`; 404 `not-found`; 409 `duplicate-payment` (includes the existing payment), `payment-not-held` (officer decision on a payment that isn't HELD; includes it); 422 `unknown-account`, `payment-id-reused`; 503 `service-busy` (with `Retry-After`).
 
 Each problem `type` is `payments.problem-base-uri` + the slug. By default that resolves to the matching section of [docs/problems.md](docs/problems.md) (for example `https://github.com/vinaykumar101997/payment-event-service/blob/main/docs/problems.md#invalid-amount`), which gives the status, when it occurs, an example body and what the client should do. Set `PAYMENTS_PROBLEM_BASE_URI` to publish them elsewhere. **Change:** `type` values used to be `https://example.com/problems/<slug>`; clients that matched on those must switch to the new URIs. There are no known clients.
 
@@ -209,6 +212,7 @@ Each problem `type` is `payments.problem-base-uri` + the slug. By default that r
 - **Limits are per payment and change only on restart.** `payments.max-amount-by-currency` sets a cap per currency (falling back to `payments.max-amount`). There are no per-account or per-day limits.
 - **Migrations have no statement timeout.** Flyway runs on its own connection without `statement_timeout` (it keeps `lock_timeout`), so a runaway migration is stopped only by a lock timeout or an operator.
 - **Problem type URIs point at `main` on GitHub by default.** A client reads the latest [docs/problems.md](docs/problems.md), not necessarily the version deployed. Set `PAYMENTS_PROBLEM_BASE_URI` per environment to change it.
+- **One API key for every client.** All clients share `PAYMENTS_API_KEY`; there are no per-client keys or roles, so an officer decision can be made by any client, and `officer` in the request body is not verified. Changing the key needs a restart.
 - **Event order per payment is not guaranteed once a payment can have two events on the same topic.** Today each payment has at most one event per topic, so it doesn't matter yet. Future reversals would need ordered publishing per key.
 
 ## Roadmap
@@ -218,7 +222,7 @@ Each problem `type` is `payments.problem-base-uri` + the slug. By default that r
 - Reversals using compensating ledger entries
 - Metrics (Micrometer, Prometheus), OpenTelemetry tracing, payment id as a correlation id
 - Load and chaos tests: throughput and p95/p99 latency with k6, a consumer killed mid-payment
-- API authentication
+- Per-client API keys or OAuth 2 client credentials, with an officer role for release and reject
 
 ## License
 
