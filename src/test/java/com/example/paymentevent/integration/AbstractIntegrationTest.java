@@ -28,7 +28,7 @@ import java.util.UUID;
  * containers across test classes; Testcontainers' Ryuk reaper cleans them up on JVM exit.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@Import({FaultInjectingPaymentProducer.class, MigrationSessionRecorder.class})
+@Import({FaultInjectingPaymentProducer.class, MigrationSessionRecorder.class, RecordingOverdueHook.class})
 public abstract class AbstractIntegrationTest {
 
     static final PostgreSQLContainer<?> POSTGRES =
@@ -61,6 +61,9 @@ public abstract class AbstractIntegrationTest {
         // Tests call PaymentSweeper.sweep() directly; a background sweep firing mid-test would
         // claim their stale payments first and make the outcome depend on timing.
         registry.add("payments.sweeper.interval-ms", () -> "3600000");
+        // HeldPaymentSweeperIT calls sweep() itself, with payments backdated past the timeout.
+        registry.add("payments.screening.overdue-sweep-interval-ms", () -> "3600000");
+        registry.add("payments.screening.timeout", () -> "PT30M");
         // Per-currency cap used by ApiProblemDetailsIT; every other currency keeps the default.
         registry.add("payments.max-amount-by-currency.JPY", () -> "150000000");
         // Small batches so OutboxRetentionIT exercises several of them with a few hundred rows.

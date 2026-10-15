@@ -174,6 +174,7 @@ Off by default (`payments.screening.enabled=false`); with it off, everything abo
 | `HELD` | verdict FLAG or ERROR | `HELD` | none | yes (S3) |
 | `HELD` | verdict REJECT | `REJECTED` | outbox `payment.failed` | yes (S3) |
 | `HELD` | officer reject | `REJECTED` | outbox `payment.failed` | not yet (S5) |
+| `HELD` | held longer than `payments.screening.timeout` (default 1 hour) | `HELD` | `overdue_at` set once, WARN log line, `HeldPaymentOverdueHook` called; never released or rejected | yes (S4) |
 | `RECEIVED` | consumer claims it | `PROCESSING` | none | yes |
 | `PROCESSING` | money moved | `PROCESSED` | ledger entries, outbox `transactions` | yes |
 | `PROCESSING` | business rule failed (funds, currency, account), or the event doesn't match the stored row | `FAILED` | outbox `payment.failed` | yes |

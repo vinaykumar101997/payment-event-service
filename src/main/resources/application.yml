@@ -61,12 +61,13 @@ spring:
       concurrency: 3
       ack-mode: RECORD
 
-  # OutboxRelay (every 500ms), PaymentSweeper (every 30s) and OutboxRetentionJob (hourly) are
-  # all @Scheduled; one thread each, so a slow sweep or purge can't delay the relay.
+  # OutboxRelay (every 500ms), PaymentSweeper (every 30s), HeldPaymentSweeper (every 60s) and
+  # OutboxRetentionJob (hourly) are all @Scheduled; one thread each, so a slow sweep or purge
+  # can't delay the relay.
   task:
     scheduling:
       pool:
-        size: 3
+        size: 4
 
 payments:
   # Default largest amount a single payment may move, for any currency not listed in
@@ -85,6 +86,10 @@ payments:
     # event is published instead of the "payments" event; it is processed only after a CLEAR
     # verdict or an officer release (see README, Screening hold).
     enabled: false
+    # A payment HELD longer than this is marked overdue by HeldPaymentSweeper (log line and
+    # HeldPaymentOverdueHook). It is never released or rejected because of it.
+    timeout: PT1H
+    overdue-sweep-interval-ms: 60000
   processing:
     # Failed non-business processing attempts before a payment is moved to POISONED.
     max-attempts: 10
