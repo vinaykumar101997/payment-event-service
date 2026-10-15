@@ -4,6 +4,7 @@ import com.example.paymentevent.exception.DuplicatePaymentException;
 import com.example.paymentevent.exception.InvalidAmountException;
 import com.example.paymentevent.exception.InvalidPaymentRequestException;
 import com.example.paymentevent.exception.PaymentIdReusedException;
+import com.example.paymentevent.exception.InvalidQueryException;
 import com.example.paymentevent.exception.PaymentNotHeldException;
 import com.example.paymentevent.security.ApiKeyAuthenticationFilter;
 import org.springframework.security.core.AuthenticationException;
@@ -144,6 +145,11 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
     public ProblemDetail handleUnauthorized(AuthenticationException ex, HttpServletRequest request) {
         return problem(HttpStatus.UNAUTHORIZED, ProblemType.UNAUTHORIZED,
                 "Missing or invalid " + ApiKeyAuthenticationFilter.HEADER + " header", request.getRequestURI());
+    }
+
+    @ExceptionHandler(InvalidQueryException.class)
+    public ProblemDetail handleInvalidQuery(InvalidQueryException ex, HttpServletRequest request) {
+        return problem(HttpStatus.BAD_REQUEST, ProblemType.INVALID_QUERY, ex.getMessage(), request.getRequestURI());
     }
 
     @ExceptionHandler(ServiceBusyException.class)

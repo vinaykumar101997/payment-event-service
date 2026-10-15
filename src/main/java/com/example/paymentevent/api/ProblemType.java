@@ -16,7 +16,8 @@ public enum ProblemType {
     UNKNOWN_ACCOUNT("unknown-account", "Unknown account"),
     SERVICE_BUSY("service-busy", "Service busy"),
     PAYMENT_NOT_HELD("payment-not-held", "Payment not held"),
-    UNAUTHORIZED("unauthorized", "Unauthorized");
+    UNAUTHORIZED("unauthorized", "Unauthorized"),
+    INVALID_QUERY("invalid-query", "Invalid query");
 
     private final String slug;
     private final String title;

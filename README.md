@@ -187,6 +187,26 @@ Officer decisions (migration V11) are stored once per payment with officer, note
 
 `PROCESSED`, `FAILED`, `POISONED` and `REJECTED` are terminal. From `RECEIVED` on, a released payment follows exactly the same path as one created with screening off. Postgres also enforces the list of statuses (constraint `payments_status_known`, migration V8).
 
+### Listing held payments
+
+`GET /payments?status=HELD` is the officers' work list. Items come oldest first (by `heldSince`, ties by `paymentId`):
+
+```json
+{
+  "items": [
+    {
+      "paymentId": "p-2", "amount": 10.00, "currency": "USD",
+      "fromAccount": "ACC-1001", "toAccount": "ACC-1002",
+      "heldSince": "2026-10-15T12:00:00.123456Z", "overdue": false,
+      "reasons": ["name match"], "riskScore": null
+    }
+  ],
+  "nextCursor": null
+}
+```
+
+`reasons` and `riskScore` come from the latest recorded verdict for the payment, and are both `null` if it has none. `overdue=true` returns only payments marked overdue, `overdue=false` only the others. Pagination uses a cursor: pass `nextCursor` back as `cursor` to get the next page; `null` means there are no more. The cursor holds the last item's position (`heldSince`, `paymentId`), so a payment released between two requests doesn't make the next page skip or repeat anything.
+
 ### Topics
 
 | Topic | Direction | Key | Content |
@@ -224,7 +244,6 @@ curl -X POST localhost:8080/payments/p-2/release -H "X-API-Key: $PAYMENTS_API_KE
 ### Not done yet
 
 - **No screening service here.** This repository only publishes requests, consumes verdicts and holds payments; the Python screening service is separate and not built.
-- **No list of held or overdue payments.** Officers need the payment id; there is no endpoint or report that lists HELD payments or those with `overdue_at` set.
 - **Overdue is a log line only.** `HeldPaymentOverdueHook` has no implementation (metrics are out of scope), so the WARN line is the only signal.
 - **Dead-lettered verdicts are not replayed.** A verdict on `payment.screening.completed.DLT` stays there; its payment stays HELD until another verdict or an officer decides.
 - **A lost screening request is not re-sent.** If its outbox row goes dead, the payment stays HELD and only shows up as overdue.
@@ -238,13 +257,14 @@ curl -X POST localhost:8080/payments/p-2/release -H "X-API-Key: $PAYMENTS_API_KE
 |---|---|---|
 | POST | `/payments` | Submit a payment |
 | GET | `/payments/{id}` | Payment status and failure reason |
+| GET | `/payments?status=HELD` | Held payments, oldest first. Optional `overdue=true` or `false`, `limit` (1 to 200, default 50), `cursor` |
 | GET | `/accounts/{id}` | Account balance |
 | POST | `/payments/{id}/release` | Officer releases a HELD payment. Body `{"officer": "...", "note": "..."}`, both required |
 | POST | `/payments/{id}/reject` | Officer rejects a HELD payment. Same body |
 
 Every request needs the header `X-API-Key` with the value of `PAYMENTS_API_KEY` (required, no default). The comparison is constant-time (SHA-256 digests compared with `MessageDigest.isEqual`). Only `/actuator/health` is left open; this build has no actuator, so that path returns 404, not 401.
 
-Errors are `application/problem+json`: 401 `unauthorized` (missing or wrong key; same answer for both); `validation-failed`, `malformed-request`, `invalid-request`, `invalid-amount`; 404 `not-found`; 409 `duplicate-payment` (includes the existing payment), `payment-not-held` (officer decision on a payment that isn't HELD; includes it); 422 `unknown-account`, `payment-id-reused`; 503 `service-busy` (with `Retry-After`).
+Errors are `application/problem+json`: 401 `unauthorized` (missing or wrong key; same answer for both); 400 `invalid-query` (list parameters), `validation-failed`, `malformed-request`, `invalid-request`, `invalid-amount`; 404 `not-found`; 409 `duplicate-payment` (includes the existing payment), `payment-not-held` (officer decision on a payment that isn't HELD; includes it); 422 `unknown-account`, `payment-id-reused`; 503 `service-busy` (with `Retry-After`).
 
 Each problem `type` is `payments.problem-base-uri` + the slug. By default that resolves to the matching section of [docs/problems.md](docs/problems.md) (for example `https://github.com/vinaykumar101997/payment-event-service/blob/main/docs/problems.md#invalid-amount`), which gives the status, when it occurs, an example body and what the client should do. Set `PAYMENTS_PROBLEM_BASE_URI` to publish them elsewhere. **Change:** `type` values used to be `https://example.com/problems/<slug>`; clients that matched on those must switch to the new URIs. There are no known clients.
 

@@ -272,3 +272,24 @@ In the examples, `{base}` stands for the configured base URI.
 
 - **What the client should do:** send the correct key in `X-API-Key`. Retrying without fixing
   the key won't help.
+
+## invalid-query
+
+- **HTTP status:** 400 Bad Request
+- **When it occurs:** `GET /payments` without `status=HELD` (it is the only listable status),
+  with `limit` outside 1 to 200 or not a number, `overdue` other than `true` or `false`, or a
+  `cursor` that wasn't returned by this endpoint. `detail` names the parameter.
+- **Example response:**
+
+  ```json
+  {
+    "type": "{base}invalid-query",
+    "title": "Invalid query",
+    "status": 400,
+    "detail": "limit must be a whole number from 1 to 200",
+    "instance": "/payments"
+  }
+  ```
+
+- **What the client should do:** fix the parameter. Use `nextCursor` from the previous page
+  exactly as returned; don't build cursors yourself.
