@@ -63,7 +63,7 @@ What the integration tests prove, against real Postgres and Kafka:
 *Technical:* business failures publish `payment.failed`. The dead-letter topic receives only mismatched events and payments that exceed the retry limit (they are marked POISONED).
 
 **Nothing waits forever, and amounts make sense.** A stuck database lock fails fast instead of freezing the service, and amounts are checked against each currency's rules.
-*Technical:* Postgres `lock_timeout` and `statement_timeout` are set for application connections. Decimal places are validated per currency (JPY has none) using `java.util.Currency`, with a configurable maximum amount.
+*Technical:* Postgres `lock_timeout` and `statement_timeout` are set for application connections. Decimal places are validated per currency (JPY has none) using `java.util.Currency`, and the maximum amount is configurable per currency. Database migrations run on their own connection without the statement timeout, so a long migration isn't cancelled at start-up.
 
 **Clear, consistent errors.** Every error response has the same shape, so client applications can handle them reliably.
 *Technical:* RFC 9457 problem details (`application/problem+json`) with a stable `type` per error, each resolving to its entry in [docs/problems.md](docs/problems.md).
@@ -172,12 +172,13 @@ Each problem `type` is `payments.problem-base-uri` + the slug. By default that r
 ## Known limitations
 
 - **The sweeper is a safety net, not the main delivery path.** If processing keeps failing with a retryable error for longer than the consumer's retries, the message goes to the dead-letter topic and the payment stays RECEIVED. The sweeper re-enqueues such payments after 60 seconds.
-- **The outbox table grows without limit.** Published rows are kept for auditing and nothing deletes them yet. A change-data-capture relay such as Debezium would also remove the 500ms polling delay.
+- **A payment on a permanently locked account never finishes and is never poisoned.** A lock timeout (Postgres `lock_timeout`, SQLState 55P03) is retried but not counted toward the poison limit, so a busy account can't push a valid payment to POISONED. The flip side: if the account stays locked, the payment cycles through Kafka retries, the dead-letter topic and the sweeper until the lock is released. Each lock timeout is logged.
+- **Creating a payment can wait on an account that is being processed.** The consumer locks accounts with `FOR UPDATE`, which also blocks the foreign key check of a new `POST /payments` for the same account. Normally that is milliseconds; if it exceeds `lock_timeout`, the POST fails with a generic 500 rather than a problem-details response.
+- **Outbox retention deletes, it does not archive.** Published outbox rows older than `outbox.retention.days` (default 30) are deleted hourly in batches; dead and pending rows are kept. There is no archive, so the audit trail in `outbox_events` only goes back that far.
+- **Limits are per payment and change only on restart.** `payments.max-amount-by-currency` sets a cap per currency (falling back to `payments.max-amount`). There are no per-account or per-day limits.
+- **Migrations have no statement timeout.** Flyway runs on its own connection without `statement_timeout` (it keeps `lock_timeout`), so a runaway migration is stopped only by a lock timeout or an operator.
+- **Problem type URIs point at `main` on GitHub by default.** A client reads the latest [docs/problems.md](docs/problems.md), not necessarily the version deployed. Set `PAYMENTS_PROBLEM_BASE_URI` per environment to change it.
 - **Event order per payment is not guaranteed once a payment can have two events on the same topic.** Today each payment has at most one event per topic, so it doesn't matter yet. Future reversals would need ordered publishing per key.
-- **One maximum amount for every currency.** The same cap applies in USD and JPY.
-- **Lock timeouts count toward the poison limit.** A very busy account could, in theory, push a valid payment to POISONED.
-- **The statement timeout also applies to database migrations.** A slow migration on a large table could fail.
-- **Problem `type` URIs use an `example.com` placeholder.**
 
 ## Roadmap
 
@@ -187,7 +188,6 @@ Each problem `type` is `payments.problem-base-uri` + the slug. By default that r
 - Metrics (Micrometer, Prometheus), OpenTelemetry tracing, payment id as a correlation id
 - Load and chaos tests: throughput and p95/p99 latency with k6, a consumer killed mid-payment
 - API authentication
-- Fix the smaller limitations above: per-currency maximums, lock timeouts excluded from the poison limit, migrations exempt from the statement timeout, an outbox retention job
 
 ## License
 

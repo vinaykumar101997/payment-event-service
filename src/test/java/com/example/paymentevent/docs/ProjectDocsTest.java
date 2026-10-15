@@ -40,6 +40,28 @@ class ProjectDocsTest {
         assertThat(readme).containsPattern("Tests run: \\d+, Failures: 0, Errors: 0");
     }
 
+    /**
+     * The README may only claim what the code does. These five limitations were fixed in
+     * Stage 1 (T2 to T6), so the Known limitations section must no longer list them, and must
+     * point at what replaced them.
+     */
+    @Test
+    void readmeKnownLimitationsNoLongerListFixedProblems() throws IOException {
+        String readme = read("README.md");
+        int start = readme.indexOf("## Known limitations");
+        int end = readme.indexOf("\n## ", start + 1);
+        assertThat(start).as("Known limitations section").isNotNegative();
+        String limitations = readme.substring(start, end < 0 ? readme.length() : end);
+
+        assertThat(limitations).doesNotContain(
+                "One maximum amount for every currency",
+                "Lock timeouts count toward the poison limit",
+                "The statement timeout also applies to database migrations",
+                "The outbox table grows without limit",
+                "`example.com` placeholder");
+        assertThat(limitations).contains("max-amount-by-currency", "outbox.retention.days", "lock timeout");
+    }
+
     private static String read(String path) throws IOException {
         return Files.readString(Path.of(path), StandardCharsets.UTF_8);
     }
