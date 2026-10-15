@@ -21,7 +21,7 @@ The service is built around these cases, and each one is covered by automated te
 
 ## How a payment flows
 
-1. The client sends the payment to the REST API. The service validates it and saves it with the status RECEIVED.
+1. The client sends the payment to the REST API. The service validates it and saves it with the status RECEIVED. (With screening switched on it is saved as HELD instead and waits for a screening verdict or an officer; see [Screening hold](#screening-hold).)
 2. In the same database transaction, it writes a note that the payment needs processing. A background relay publishes that note to Kafka.
 3. A consumer picks up the message, claims the payment, locks both accounts, checks the balance, moves the money and writes two ledger entries.
 4. The result is published as an event: `transactions` when the payment succeeds, `payment.failed` when it is declined.
@@ -162,30 +162,75 @@ The badge above shows the latest GitHub Actions run of the same command.
 
 ## Screening hold
 
-Off by default (`payments.screening.enabled=false`); with it off, everything above is unchanged. When it is on, a new payment is saved as HELD and the service publishes a `payment.screening.requested` event instead of the `payments` event, so nothing processes the payment until it is released. The event formats are JSON Schemas in [`contracts/`](contracts/README.md).
+Optional fraud screening by a separate service (the plan is a Python service; it is not in this repository). Off by default (`payments.screening.enabled=false`); with it off, everything above is unchanged, which `ScreeningDisabledEndToEndIT` checks. When it is on, a new payment is saved as HELD and the service publishes a `payment.screening.requested` event instead of the `payments` event, so nothing can move its money until a screening verdict or a compliance officer releases it. Nothing ever releases a payment automatically. The event formats are JSON Schemas (draft 2020-12) in [`contracts/`](contracts/README.md), shared with the screening service; incoming verdicts are validated against them.
 
 ### Payment status transitions
 
-| From | Trigger | To | Also | Implemented |
-|---|---|---|---|---|
-| (new) | `POST /payments`, screening off | `RECEIVED` | outbox `payments` | yes |
-| (new) | `POST /payments`, screening on | `HELD` | outbox `payment.screening.requested` | yes (S2) |
-| `HELD` | verdict CLEAR | `RECEIVED` | outbox `payments` | yes (S3) |
-| `HELD` | officer release | `RECEIVED` | outbox `payments`; officer, note, time in `officer_decisions` | yes (S5) |
-| `HELD` | verdict FLAG or ERROR | `HELD` | none | yes (S3) |
-| `HELD` | verdict REJECT | `REJECTED` | outbox `payment.failed` | yes (S3) |
-| `HELD` | officer reject | `REJECTED` | outbox `payment.failed`; officer, note, time in `officer_decisions` | yes (S5) |
-| `HELD` | held longer than `payments.screening.timeout` (default 1 hour) | `HELD` | `overdue_at` set once, WARN log line, `HeldPaymentOverdueHook` called; never released or rejected | yes (S4) |
-| `RECEIVED` | consumer claims it | `PROCESSING` | none | yes |
-| `PROCESSING` | money moved | `PROCESSED` | ledger entries, outbox `transactions` | yes |
-| `PROCESSING` | business rule failed (funds, currency, account), or the event doesn't match the stored row | `FAILED` | outbox `payment.failed` | yes |
-| `RECEIVED` | `payments.processing.max-attempts` non-business failures | `POISONED` | message to `payments.DLT` | yes |
+| From | Trigger | To | Also |
+|---|---|---|---|
+| (new) | `POST /payments`, screening off | `RECEIVED` | outbox `payments` |
+| (new) | `POST /payments`, screening on | `HELD` | outbox `payment.screening.requested` |
+| `HELD` | verdict CLEAR | `RECEIVED` | outbox `payments` |
+| `HELD` | officer release | `RECEIVED` | outbox `payments`; officer, note, time in `officer_decisions` |
+| `HELD` | verdict FLAG or ERROR | `HELD` | none |
+| `HELD` | verdict REJECT | `REJECTED` | outbox `payment.failed` |
+| `HELD` | officer reject | `REJECTED` | outbox `payment.failed`; officer, note, time in `officer_decisions` |
+| `HELD` | held longer than `payments.screening.timeout` (default 1 hour) | `HELD` | `overdue_at` set once, WARN log line, `HeldPaymentOverdueHook` called; never released or rejected |
+| `RECEIVED` | consumer claims it | `PROCESSING` | none |
+| `PROCESSING` | money moved | `PROCESSED` | ledger entries, outbox `transactions` |
+| `PROCESSING` | business rule failed (funds, currency, account), or the event doesn't match the stored row | `FAILED` | outbox `payment.failed` |
+| `RECEIVED` | `payments.processing.max-attempts` non-business failures | `POISONED` | message to `payments.DLT` |
 
 Every verdict event is stored in `screening_verdicts` (migration V9) under the key (paymentId, eventId), with what it did. A redelivered event changes nothing. A verdict for a payment that has already left `HELD` is stored as `IGNORED_NOT_HELD` and not applied, so a payment is never decided twice. A verdict that doesn't match the schema, or names an unknown payment, goes to `payment.screening.completed.DLT` unchanged and is never applied.
 
 Officer decisions (migration V11) are stored once per payment with officer, note and time. Repeating the same decision returns 200 and changes nothing (the first officer and note stay). The opposite decision afterwards, or a decision on a payment a verdict already decided, is 409 `payment-not-held`. A verdict and an officer decision on the same payment lock the payment row, so they are applied one after the other.
 
 `PROCESSED`, `FAILED`, `POISONED` and `REJECTED` are terminal. From `RECEIVED` on, a released payment follows exactly the same path as one created with screening off. Postgres also enforces the list of statuses (constraint `payments_status_known`, migration V8).
+
+### Topics
+
+| Topic | Direction | Key | Content |
+|---|---|---|---|
+| `payment.screening.requested` | published (outbox) | paymentId | [`payment.screening.requested.v1`](contracts/payment.screening.requested.v1.schema.json): schemaVersion, eventId, paymentId, accounts, amount as a decimal string, currency, createdAt |
+| `payment.screening.completed` | consumed | paymentId | [`payment.screening.completed.v1`](contracts/payment.screening.completed.v1.schema.json): verdict CLEAR, FLAG, REJECT or ERROR, reasons, optional riskScore, decidedAt, screeningRunId. Read as plain JSON; no Spring type headers needed |
+| `payment.screening.completed.DLT` | published | as received | verdict records that failed the schema or name an unknown payment, byte for byte; also valid verdicts that still failed after about 10 seconds of retries |
+
+The three topics are created (3 partitions each) only when screening is on. `payments`, `transactions`, `payment.failed` and `payments.DLT` are unchanged.
+
+### Running with screening on
+
+Settings (environment variable form in brackets):
+
+- `payments.screening.enabled` (`PAYMENTS_SCREENING_ENABLED`): `true` to hold new payments. Default `false`.
+- `payments.screening.timeout` (`PAYMENTS_SCREENING_TIMEOUT`): ISO-8601 duration after which a HELD payment is marked overdue. Default `PT1H`.
+- `payments.screening.overdue-sweep-interval-ms`: how often the overdue check runs. Default 60000.
+
+With docker-compose, export `PAYMENTS_SCREENING_ENABLED=true` (and `PAYMENTS_API_KEY`) before `docker-compose up`; the compose file passes it through. Without the screening service, you can play its part with Kafka's console producer. The following commands were not run as part of the verification below; the same flow is what `ScreeningEndToEndIT` tests:
+
+```bash
+curl -X POST localhost:8080/payments -H "X-API-Key: $PAYMENTS_API_KEY" -H "Content-Type: application/json" -d '{
+  "paymentId": "p-2", "fromAccount": "ACC-1001", "toAccount": "ACC-1002",
+  "amount": 10.00, "currency": "USD"
+}'                                    # status HELD
+
+docker-compose exec kafka /opt/kafka/bin/kafka-console-producer.sh --bootstrap-server localhost:9092 \
+  --topic payment.screening.completed --property parse.key=true --property key.separator='|'
+p-2|{"schemaVersion":1,"eventId":"6a0c8f1e-1d2b-4c3d-9e4f-5a6b7c8d9e0f","paymentId":"p-2","verdict":"FLAG","reasons":["name match"],"decidedAt":"2026-10-15T12:00:00Z","screeningRunId":"manual-1"}
+
+curl -X POST localhost:8080/payments/p-2/release -H "X-API-Key: $PAYMENTS_API_KEY" \
+  -H "Content-Type: application/json" -d '{"officer": "alice", "note": "checked, not the listed person"}'
+```
+
+### Not done yet
+
+- **No screening service here.** This repository only publishes requests, consumes verdicts and holds payments; the Python screening service is separate and not built.
+- **No list of held or overdue payments.** Officers need the payment id; there is no endpoint or report that lists HELD payments or those with `overdue_at` set.
+- **Overdue is a log line only.** `HeldPaymentOverdueHook` has no implementation (metrics are out of scope), so the WARN line is the only signal.
+- **Dead-lettered verdicts are not replayed.** A verdict on `payment.screening.completed.DLT` stays there; its payment stays HELD until another verdict or an officer decides.
+- **A lost screening request is not re-sent.** If its outbox row goes dead, the payment stays HELD and only shows up as overdue.
+- **Officers are not individually authenticated.** Anyone with the API key can release or reject, and `officer` is free text.
+- **Switching screening on doesn't screen older payments.** Only payments created while it is on are held; switching it off doesn't release HELD ones (verdicts are then not consumed, officers can still decide).
+- **`riskScore` is stored, never used.**
 
 ## API
 
@@ -218,7 +263,6 @@ Each problem `type` is `payments.problem-base-uri` + the slug. By default that r
 ## Roadmap
 
 - ISO 20022 messages: accept pacs.008, return pacs.002 status reports, generate camt.053 statements from the ledger
-- A fraud check before money moves, with a HELD state and release/reject endpoints
 - Reversals using compensating ledger entries
 - Metrics (Micrometer, Prometheus), OpenTelemetry tracing, payment id as a correlation id
 - Load and chaos tests: throughput and p95/p99 latency with k6, a consumer killed mid-payment

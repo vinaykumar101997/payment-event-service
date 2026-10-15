@@ -80,6 +80,31 @@ class ProjectDocsTest {
         }
     }
 
+    /**
+     * S8: the README's screening section covers the topics, the switch, how to run it and
+     * what isn't done; every transition is implemented; the roadmap no longer lists the
+     * screening hold as future work.
+     */
+    @Test
+    void readmeDocumentsTheScreeningHold() throws IOException {
+        String readme = read("README.md");
+        int start = readme.indexOf("## Screening hold");
+        assertThat(start).as("Screening hold section").isNotNegative();
+        int end = readme.indexOf("\n## ", start + 1);
+        String screening = readme.substring(start, end < 0 ? readme.length() : end);
+
+        assertThat(screening).contains(
+                "### Topics", "`payment.screening.requested`", "`payment.screening.completed`",
+                "`payment.screening.completed.DLT`",
+                "### Running with screening on", "PAYMENTS_SCREENING_ENABLED", "payments.screening.timeout",
+                "### Not done yet");
+        assertThat(screening).doesNotContain("not yet (S");
+
+        int roadmap = readme.indexOf("## Roadmap");
+        assertThat(roadmap).isNotNegative();
+        assertThat(readme.substring(roadmap)).doesNotContain("A fraud check before money moves");
+    }
+
     private static String read(String path) throws IOException {
         return Files.readString(Path.of(path), StandardCharsets.UTF_8);
     }
