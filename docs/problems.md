@@ -216,3 +216,37 @@ In the examples, `{base}` stands for the configured base URI.
 - **What the client should do:** wait at least the `Retry-After` seconds and send the same
   request again, with the same `paymentId`. It is safe: if an earlier attempt did get through,
   the retry is answered with `duplicate-payment` (409) and the existing payment.
+
+## payment-not-held
+
+- **HTTP status:** 409 Conflict
+- **When it occurs:** `POST /payments/{id}/release` or `POST /payments/{id}/reject` for a
+  payment that is not HELD and has no earlier officer decision of the same kind: the opposite
+  officer decision was already made, a screening verdict already released or rejected it, or
+  it was never held. Nothing is changed or recorded. (Repeating the same decision is not an
+  error: it returns 200 with the payment.) The `payment` member carries the current state.
+- **Example response:**
+
+  ```json
+  {
+    "type": "{base}payment-not-held",
+    "title": "Payment not held",
+    "status": 409,
+    "detail": "Cannot release payment p-1: it is REJECTED, not HELD",
+    "instance": "/payments/p-1/release",
+    "payment": {
+      "paymentId": "p-1",
+      "fromAccount": "ACC-1001",
+      "toAccount": "ACC-1002",
+      "amount": 25.00,
+      "currency": "USD",
+      "status": "REJECTED",
+      "failureReason": "Rejected by officer carol: customer confirmed fraud",
+      "createdAt": "2026-10-15T18:30:00Z",
+      "processedAt": "2026-10-15T18:42:10Z"
+    }
+  }
+  ```
+
+- **What the client should do:** don't retry. Read `payment.status`: the payment has already
+  been decided, and that decision stands.

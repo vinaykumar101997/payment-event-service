@@ -170,10 +170,10 @@ Off by default (`payments.screening.enabled=false`); with it off, everything abo
 | (new) | `POST /payments`, screening off | `RECEIVED` | outbox `payments` | yes |
 | (new) | `POST /payments`, screening on | `HELD` | outbox `payment.screening.requested` | yes (S2) |
 | `HELD` | verdict CLEAR | `RECEIVED` | outbox `payments` | yes (S3) |
-| `HELD` | officer release | `RECEIVED` | outbox `payments` | not yet (S5) |
+| `HELD` | officer release | `RECEIVED` | outbox `payments`; officer, note, time in `officer_decisions` | yes (S5) |
 | `HELD` | verdict FLAG or ERROR | `HELD` | none | yes (S3) |
 | `HELD` | verdict REJECT | `REJECTED` | outbox `payment.failed` | yes (S3) |
-| `HELD` | officer reject | `REJECTED` | outbox `payment.failed` | not yet (S5) |
+| `HELD` | officer reject | `REJECTED` | outbox `payment.failed`; officer, note, time in `officer_decisions` | yes (S5) |
 | `HELD` | held longer than `payments.screening.timeout` (default 1 hour) | `HELD` | `overdue_at` set once, WARN log line, `HeldPaymentOverdueHook` called; never released or rejected | yes (S4) |
 | `RECEIVED` | consumer claims it | `PROCESSING` | none | yes |
 | `PROCESSING` | money moved | `PROCESSED` | ledger entries, outbox `transactions` | yes |
@@ -181,6 +181,8 @@ Off by default (`payments.screening.enabled=false`); with it off, everything abo
 | `RECEIVED` | `payments.processing.max-attempts` non-business failures | `POISONED` | message to `payments.DLT` | yes |
 
 Every verdict event is stored in `screening_verdicts` (migration V9) under the key (paymentId, eventId), with what it did. A redelivered event changes nothing. A verdict for a payment that has already left `HELD` is stored as `IGNORED_NOT_HELD` and not applied, so a payment is never decided twice. A verdict that doesn't match the schema, or names an unknown payment, goes to `payment.screening.completed.DLT` unchanged and is never applied.
+
+Officer decisions (migration V11) are stored once per payment with officer, note and time. Repeating the same decision returns 200 and changes nothing (the first officer and note stay). The opposite decision afterwards, or a decision on a payment a verdict already decided, is 409 `payment-not-held`. A verdict and an officer decision on the same payment lock the payment row, so they are applied one after the other.
 
 `PROCESSED`, `FAILED`, `POISONED` and `REJECTED` are terminal. From `RECEIVED` on, a released payment follows exactly the same path as one created with screening off. Postgres also enforces the list of statuses (constraint `payments_status_known`, migration V8).
 
@@ -191,8 +193,10 @@ Every verdict event is stored in `screening_verdicts` (migration V9) under the k
 | POST | `/payments` | Submit a payment |
 | GET | `/payments/{id}` | Payment status and failure reason |
 | GET | `/accounts/{id}` | Account balance |
+| POST | `/payments/{id}/release` | Officer releases a HELD payment. Body `{"officer": "...", "note": "..."}`, both required |
+| POST | `/payments/{id}/reject` | Officer rejects a HELD payment. Same body |
 
-Errors are `application/problem+json`: 400 `validation-failed`, `malformed-request`, `invalid-request`, `invalid-amount`; 404 `not-found`; 409 `duplicate-payment` (includes the existing payment); 422 `unknown-account`, `payment-id-reused`; 503 `service-busy` (with `Retry-After`).
+Errors are `application/problem+json`: 400 `validation-failed`, `malformed-request`, `invalid-request`, `invalid-amount`; 404 `not-found`; 409 `duplicate-payment` (includes the existing payment), `payment-not-held` (officer decision on a payment that isn't HELD; includes it); 422 `unknown-account`, `payment-id-reused`; 503 `service-busy` (with `Retry-After`).
 
 Each problem `type` is `payments.problem-base-uri` + the slug. By default that resolves to the matching section of [docs/problems.md](docs/problems.md) (for example `https://github.com/vinaykumar101997/payment-event-service/blob/main/docs/problems.md#invalid-amount`), which gives the status, when it occurs, an example body and what the client should do. Set `PAYMENTS_PROBLEM_BASE_URI` to publish them elsewhere. **Change:** `type` values used to be `https://example.com/problems/<slug>`; clients that matched on those must switch to the new URIs. There are no known clients.
 

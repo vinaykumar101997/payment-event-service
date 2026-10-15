@@ -4,6 +4,7 @@ import com.example.paymentevent.exception.DuplicatePaymentException;
 import com.example.paymentevent.exception.InvalidAmountException;
 import com.example.paymentevent.exception.InvalidPaymentRequestException;
 import com.example.paymentevent.exception.PaymentIdReusedException;
+import com.example.paymentevent.exception.PaymentNotHeldException;
 import com.example.paymentevent.exception.ResourceNotFoundException;
 import com.example.paymentevent.exception.ServiceBusyException;
 import com.example.paymentevent.exception.UnknownAccountException;
@@ -122,6 +123,15 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
     public ProblemDetail handleUnknownAccount(UnknownAccountException ex, HttpServletRequest request) {
         return problem(HttpStatus.UNPROCESSABLE_ENTITY, ProblemType.UNKNOWN_ACCOUNT, ex.getMessage(),
                 request.getRequestURI());
+    }
+
+    /** Officer release/reject of a payment that isn't HELD; carries its current state like duplicate-payment. */
+    @ExceptionHandler(PaymentNotHeldException.class)
+    public ProblemDetail handlePaymentNotHeld(PaymentNotHeldException ex, HttpServletRequest request) {
+        ProblemDetail problem = problem(HttpStatus.CONFLICT, ProblemType.PAYMENT_NOT_HELD, ex.getMessage(),
+                request.getRequestURI());
+        problem.setProperty("payment", PaymentResponse.from(ex.payment()));
+        return problem;
     }
 
     @ExceptionHandler(ServiceBusyException.class)
