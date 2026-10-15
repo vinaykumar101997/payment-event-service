@@ -31,6 +31,15 @@ class ProjectDocsTest {
         assertThat(book).contains("| Date | Command | Result line | Commit |");
     }
 
+    @Test
+    void readmeHasCiBadgeAndVerificationSection() throws IOException {
+        String readme = read("README.md");
+
+        assertThat(readme).contains("actions/workflows/ci.yml/badge.svg");
+        assertThat(readme).contains("## Verification");
+        assertThat(readme).containsPattern("Tests run: \\d+, Failures: 0, Errors: 0");
+    }
+
     private static String read(String path) throws IOException {
         return Files.readString(Path.of(path), StandardCharsets.UTF_8);
     }

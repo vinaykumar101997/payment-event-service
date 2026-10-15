@@ -1,5 +1,7 @@
 # payment-event-service
 
+[![CI](https://github.com/vinaykumar101997/payment-event-service/actions/workflows/ci.yml/badge.svg)](https://github.com/vinaykumar101997/payment-event-service/actions/workflows/ci.yml)
+
 A payment service that moves money between accounts correctly, even when requests are repeated, payments collide, or part of the system fails.
 
 ## What it is
@@ -141,6 +143,19 @@ To run the app from your IDE instead, start Postgres and Kafka with docker-compo
 ```
 
 The integration tests start real Postgres and Kafka containers once per test run and share them across test classes.
+
+## Verification
+
+Last full run: 2026-10-15, `./mvnw -B clean verify` on a clean checkout of `main` (commit 964449f), Windows 11, JDK 17.0.12, Docker 29.8.1:
+
+```
+[INFO] Tests run: 36, Failures: 0, Errors: 0, Skipped: 0   (unit, surefire)
+[INFO] Tests run: 38, Failures: 0, Errors: 0, Skipped: 0   (integration, failsafe)
+[INFO] BUILD SUCCESS
+[INFO] Total time:  02:38 min
+```
+
+The badge above shows the latest GitHub Actions run of the same command.
 
 ## API
 
