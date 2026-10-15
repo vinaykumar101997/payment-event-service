@@ -77,6 +77,9 @@ payments:
   # None are set by default, so every currency uses max-amount. Example:
   #   max-amount-by-currency:
   #     JPY: 150000000
+  # Base of every problem "type" URI (base + slug, e.g. ...problems.md#invalid-amount). The
+  # default resolves to docs/problems.md on GitHub; override per environment.
+  problem-base-uri: "${PAYMENTS_PROBLEM_BASE_URI:https://github.com/vinaykumar101997/payment-event-service/blob/main/docs/problems.md#}"
   processing:
     # Failed non-business processing attempts before a payment is moved to POISONED.
     max-attempts: 10

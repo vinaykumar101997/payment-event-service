@@ -26,7 +26,9 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class ApiProblemDetailsIT extends AbstractIntegrationTest {
 
-    private static final String TYPE_BASE = "https://example.com/problems/";
+    /** The default payments.problem-base-uri: each type resolves to its section of docs/problems.md. */
+    private static final String TYPE_BASE =
+            "https://github.com/vinaykumar101997/payment-event-service/blob/main/docs/problems.md#";
 
     @Autowired
     private TestRestTemplate restTemplate;

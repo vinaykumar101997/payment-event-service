@@ -1,0 +1,194 @@
+# Problem types
+
+Every error from the API is an [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) problem
+(`Content-Type: application/problem+json`). The `type` field is
+`payments.problem-base-uri` + a slug. With the default base
+`https://github.com/vinaykumar101997/payment-event-service/blob/main/docs/problems.md#`,
+each `type` links to the section of this page with the same name.
+
+Branch on `type`, not on `title` or `detail`: `title` names the kind of problem and `detail`
+explains this occurrence in words that may change. `instance` is the request path.
+
+Errors produced by Spring MVC itself (unknown route, 405 method not allowed, 415 unsupported
+media type) are also problem details, with `type` `about:blank`, and are not listed here.
+
+In the examples, `{base}` stands for the configured base URI.
+
+## validation-failed
+
+- **HTTP status:** 400 Bad Request
+- **When it occurs:** one or more fields of `POST /payments` fail validation: a blank
+  `paymentId`, `fromAccount` or `toAccount`; a missing, zero or negative `amount`, or one with
+  more than 17 integer digits or 2 decimal places; a `currency` that is not three upper-case
+  letters. The `errors` member maps each invalid field to its message.
+- **Example response:**
+
+  ```json
+  {
+    "type": "{base}validation-failed",
+    "title": "Validation failed",
+    "status": 400,
+    "detail": "One or more fields are invalid",
+    "instance": "/payments",
+    "errors": {
+      "amount": "must be greater than 0",
+      "currency": "must be a 3-letter ISO currency code"
+    }
+  }
+  ```
+
+- **What the client should do:** fix the fields listed in `errors` and send the request
+  again. Retrying unchanged will fail the same way.
+
+## malformed-request
+
+- **HTTP status:** 400 Bad Request
+- **When it occurs:** the request body is not valid JSON, or a value has the wrong JSON type
+  (for example `"amount": "ten"`).
+- **Example response:**
+
+  ```json
+  {
+    "type": "{base}malformed-request",
+    "title": "Malformed request body",
+    "status": 400,
+    "detail": "The request body could not be read as JSON of the expected shape",
+    "instance": "/payments"
+  }
+  ```
+
+- **What the client should do:** fix the request body. This is a client bug; do not retry
+  unchanged.
+
+## invalid-request
+
+- **HTTP status:** 400 Bad Request
+- **When it occurs:** every field is valid on its own but the request as a whole is not;
+  today, `fromAccount` and `toAccount` are the same account.
+- **Example response:**
+
+  ```json
+  {
+    "type": "{base}invalid-request",
+    "title": "Invalid payment request",
+    "status": 400,
+    "detail": "fromAccount and toAccount must differ",
+    "instance": "/payments"
+  }
+  ```
+
+- **What the client should do:** correct the request. Do not retry unchanged.
+
+## invalid-amount
+
+- **HTTP status:** 400 Bad Request
+- **When it occurs:** the amount breaks a money rule: more decimal places than the currency
+  allows (JPY allows none), an unknown currency or one with more than 2 decimal places, or an
+  amount above the currency's configured maximum (`payments.max-amount-by-currency`, falling
+  back to `payments.max-amount`).
+- **Example response:**
+
+  ```json
+  {
+    "type": "{base}invalid-amount",
+    "title": "Invalid amount",
+    "status": 400,
+    "detail": "Amount 100.5 has more decimal places than JPY allows (0)",
+    "instance": "/payments"
+  }
+  ```
+
+- **What the client should do:** correct the amount or currency. An amount above the maximum
+  needs to be split or handled outside this API. Do not retry unchanged.
+
+## not-found
+
+- **HTTP status:** 404 Not Found
+- **When it occurs:** `GET /payments/{id}` or `GET /accounts/{id}` with an id that does not
+  exist.
+- **Example response:**
+
+  ```json
+  {
+    "type": "{base}not-found",
+    "title": "Resource not found",
+    "status": 404,
+    "detail": "Payment not found: p-404",
+    "instance": "/payments/p-404"
+  }
+  ```
+
+- **What the client should do:** check the id. A payment that was just created with
+  `201 Created` is readable immediately, so a 404 for it means the create did not happen.
+
+## duplicate-payment
+
+- **HTTP status:** 409 Conflict
+- **When it occurs:** `POST /payments` repeats a `paymentId` that already exists with exactly
+  the same payload (amounts compared by value, so `100` and `100.00` are the same). This is
+  the idempotent replay answer: no second payment is created. The `payment` member carries
+  the existing payment and its current status.
+- **Example response:**
+
+  ```json
+  {
+    "type": "{base}duplicate-payment",
+    "title": "Duplicate payment",
+    "status": 409,
+    "detail": "Payment already exists: p-1",
+    "instance": "/payments",
+    "payment": {
+      "paymentId": "p-1",
+      "fromAccount": "ACC-1001",
+      "toAccount": "ACC-1002",
+      "amount": 25.00,
+      "currency": "USD",
+      "status": "PROCESSED",
+      "failureReason": null,
+      "createdAt": "2026-10-15T18:30:00Z",
+      "processedAt": "2026-10-15T18:30:01Z"
+    }
+  }
+  ```
+
+- **What the client should do:** treat it as success of the original request and read the
+  outcome from `payment`. Safe to receive after a timeout-and-retry.
+
+## payment-id-reused
+
+- **HTTP status:** 422 Unprocessable Content
+- **When it occurs:** `POST /payments` uses a `paymentId` that already exists but with a
+  different payload (another amount, account or currency). The original payment is untouched.
+- **Example response:**
+
+  ```json
+  {
+    "type": "{base}payment-id-reused",
+    "title": "Payment id reused with a different payload",
+    "status": 422,
+    "detail": "paymentId p-1 already exists with a different payload",
+    "instance": "/payments"
+  }
+  ```
+
+- **What the client should do:** use a new `paymentId` for a new payment. If this was meant to
+  be a retry, the client is not sending the same payload as the first time, which is a bug.
+
+## unknown-account
+
+- **HTTP status:** 422 Unprocessable Content
+- **When it occurs:** `POST /payments` names a `fromAccount` or `toAccount` that does not exist.
+  No payment is created.
+- **Example response:**
+
+  ```json
+  {
+    "type": "{base}unknown-account",
+    "title": "Unknown account",
+    "status": 422,
+    "detail": "Unknown account: ACC-9999",
+    "instance": "/payments"
+  }
+  ```
+
+- **What the client should do:** check the account ids. Do not retry unchanged.

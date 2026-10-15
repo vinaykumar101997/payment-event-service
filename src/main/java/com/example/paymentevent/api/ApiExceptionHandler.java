@@ -7,6 +7,7 @@ import com.example.paymentevent.exception.PaymentIdReusedException;
 import com.example.paymentevent.exception.ResourceNotFoundException;
 import com.example.paymentevent.exception.UnknownAccountException;
 import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
@@ -39,11 +40,21 @@ import java.util.Map;
  *  - 422 unknown-account    fromAccount/toAccount doesn't exist
  * Extending ResponseEntityExceptionHandler also turns Spring MVC's own errors (405, 415,
  * unknown routes, ...) into problems, with type about:blank.
+ *
+ * The type URI is payments.problem-base-uri + the ProblemType slug. The default base points at
+ * docs/problems.md on GitHub, where each slug is a heading, so a type resolves to the page that
+ * explains it; each environment can point it somewhere else.
  */
 @RestControllerAdvice
 public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
 
-    static final String PROBLEM_TYPE_BASE = "https://example.com/problems/";
+    private final String problemBaseUri;
+
+    public ApiExceptionHandler(@Value("${payments.problem-base-uri}") String problemBaseUri) {
+        // Fail at start-up, not on the first error response, if the base can't form a URI.
+        URI.create(problemBaseUri + ProblemType.NOT_FOUND.slug());
+        this.problemBaseUri = problemBaseUri;
+    }
 
     @Override
     protected ResponseEntity<Object> handleMethodArgumentNotValid(MethodArgumentNotValidException ex,
@@ -53,7 +64,7 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
         for (FieldError error : ex.getBindingResult().getFieldErrors()) {
             fieldErrors.put(error.getField(), error.getDefaultMessage());
         }
-        ProblemDetail problem = problem(HttpStatus.BAD_REQUEST, "validation-failed", "Validation failed",
+        ProblemDetail problem = problem(HttpStatus.BAD_REQUEST, ProblemType.VALIDATION_FAILED,
                 "One or more fields are invalid", pathOf(request));
         problem.setProperty("errors", fieldErrors);
         return handleExceptionInternal(ex, problem, headers, status, request);
@@ -63,26 +74,25 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
     protected ResponseEntity<Object> handleHttpMessageNotReadable(HttpMessageNotReadableException ex,
                                                                   HttpHeaders headers, HttpStatusCode status,
                                                                   WebRequest request) {
-        ProblemDetail problem = problem(HttpStatus.BAD_REQUEST, "malformed-request", "Malformed request body",
+        ProblemDetail problem = problem(HttpStatus.BAD_REQUEST, ProblemType.MALFORMED_REQUEST,
                 "The request body could not be read as JSON of the expected shape", pathOf(request));
         return handleExceptionInternal(ex, problem, headers, status, request);
     }
 
     @ExceptionHandler(InvalidAmountException.class)
     public ProblemDetail handleInvalidAmount(InvalidAmountException ex, HttpServletRequest request) {
-        return problem(HttpStatus.BAD_REQUEST, "invalid-amount", "Invalid amount", ex.getMessage(),
+        return problem(HttpStatus.BAD_REQUEST, ProblemType.INVALID_AMOUNT, ex.getMessage(),
                 request.getRequestURI());
     }
 
     @ExceptionHandler(InvalidPaymentRequestException.class)
     public ProblemDetail handleInvalidRequest(InvalidPaymentRequestException ex, HttpServletRequest request) {
-        return problem(HttpStatus.BAD_REQUEST, "invalid-request", "Invalid payment request",
-                ex.getMessage(), request.getRequestURI());
+        return problem(HttpStatus.BAD_REQUEST, ProblemType.INVALID_REQUEST, ex.getMessage(), request.getRequestURI());
     }
 
     @ExceptionHandler(ResourceNotFoundException.class)
     public ProblemDetail handleNotFound(ResourceNotFoundException ex, HttpServletRequest request) {
-        return problem(HttpStatus.NOT_FOUND, "not-found", "Resource not found", ex.getMessage(),
+        return problem(HttpStatus.NOT_FOUND, ProblemType.NOT_FOUND, ex.getMessage(),
                 request.getRequestURI());
     }
 
@@ -93,29 +103,26 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
      */
     @ExceptionHandler(DuplicatePaymentException.class)
     public ProblemDetail handleDuplicate(DuplicatePaymentException ex, HttpServletRequest request) {
-        ProblemDetail problem = problem(HttpStatus.CONFLICT, "duplicate-payment", "Duplicate payment",
-                ex.getMessage(), request.getRequestURI());
+        ProblemDetail problem = problem(HttpStatus.CONFLICT, ProblemType.DUPLICATE_PAYMENT, ex.getMessage(), request.getRequestURI());
         ex.existing().ifPresent(existing -> problem.setProperty("payment", PaymentResponse.from(existing)));
         return problem;
     }
 
     @ExceptionHandler(PaymentIdReusedException.class)
     public ProblemDetail handlePaymentIdReused(PaymentIdReusedException ex, HttpServletRequest request) {
-        return problem(HttpStatus.UNPROCESSABLE_ENTITY, "payment-id-reused", "Payment id reused with a different payload",
-                ex.getMessage(), request.getRequestURI());
+        return problem(HttpStatus.UNPROCESSABLE_ENTITY, ProblemType.PAYMENT_ID_REUSED, ex.getMessage(), request.getRequestURI());
     }
 
     @ExceptionHandler(UnknownAccountException.class)
     public ProblemDetail handleUnknownAccount(UnknownAccountException ex, HttpServletRequest request) {
-        return problem(HttpStatus.UNPROCESSABLE_ENTITY, "unknown-account", "Unknown account", ex.getMessage(),
+        return problem(HttpStatus.UNPROCESSABLE_ENTITY, ProblemType.UNKNOWN_ACCOUNT, ex.getMessage(),
                 request.getRequestURI());
     }
 
-    private static ProblemDetail problem(HttpStatus status, String typeSlug, String title, String detail,
-                                         String path) {
+    private ProblemDetail problem(HttpStatus status, ProblemType type, String detail, String path) {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(status, detail);
-        problem.setType(URI.create(PROBLEM_TYPE_BASE + typeSlug));
-        problem.setTitle(title);
+        problem.setType(URI.create(problemBaseUri + type.slug()));
+        problem.setTitle(type.title());
         if (path != null) {
             problem.setInstance(URI.create(path));
         }

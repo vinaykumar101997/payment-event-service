@@ -150,7 +150,7 @@ class PaymentFlowIT extends AbstractIntegrationTest {
                 new PaymentRequest(paymentId, missing, to.getId(), new BigDecimal("10.00"), "USD"), String.class);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY);
-        assertThat(response.getBody()).contains("problems/unknown-account").contains(missing);
+        assertThat(response.getBody()).contains("problems.md#unknown-account").contains(missing);
         assertThat(restTemplate.getForEntity("/payments/{id}", String.class, paymentId).getStatusCode())
                 .isEqualTo(HttpStatus.NOT_FOUND);
     }
@@ -164,7 +164,7 @@ class PaymentFlowIT extends AbstractIntegrationTest {
                 new PaymentRequest(id("PAY"), from.getId(), missing, new BigDecimal("10.00"), "USD"), String.class);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY);
-        assertThat(response.getBody()).contains("problems/unknown-account").contains(missing);
+        assertThat(response.getBody()).contains("problems.md#unknown-account").contains(missing);
     }
 
     /**

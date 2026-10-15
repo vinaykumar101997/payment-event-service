@@ -66,7 +66,7 @@ What the integration tests prove, against real Postgres and Kafka:
 *Technical:* Postgres `lock_timeout` and `statement_timeout` are set for application connections. Decimal places are validated per currency (JPY has none) using `java.util.Currency`, with a configurable maximum amount.
 
 **Clear, consistent errors.** Every error response has the same shape, so client applications can handle them reliably.
-*Technical:* RFC 9457 problem details (`application/problem+json`) with a stable `type` per error.
+*Technical:* RFC 9457 problem details (`application/problem+json`) with a stable `type` per error, each resolving to its entry in [docs/problems.md](docs/problems.md).
 
 ## Architecture
 
@@ -166,6 +166,8 @@ The badge above shows the latest GitHub Actions run of the same command.
 | GET | `/accounts/{id}` | Account balance |
 
 Errors are `application/problem+json`: 400 `validation-failed`, `malformed-request`, `invalid-request`, `invalid-amount`; 404 `not-found`; 409 `duplicate-payment` (includes the existing payment); 422 `unknown-account`, `payment-id-reused`.
+
+Each problem `type` is `payments.problem-base-uri` + the slug. By default that resolves to the matching section of [docs/problems.md](docs/problems.md) (for example `https://github.com/vinaykumar101997/payment-event-service/blob/main/docs/problems.md#invalid-amount`), which gives the status, when it occurs, an example body and what the client should do. Set `PAYMENTS_PROBLEM_BASE_URI` to publish them elsewhere. **Change:** `type` values used to be `https://example.com/problems/<slug>`; clients that matched on those must switch to the new URIs. There are no known clients.
 
 ## Known limitations
 
