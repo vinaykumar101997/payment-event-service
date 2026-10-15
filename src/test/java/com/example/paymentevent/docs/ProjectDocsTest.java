@@ -1,5 +1,6 @@
 package com.example.paymentevent.docs;
 
+import com.example.paymentevent.domain.PaymentStatus;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -60,6 +61,23 @@ class ProjectDocsTest {
                 "The outbox table grows without limit",
                 "`example.com` placeholder");
         assertThat(limitations).contains("max-amount-by-currency", "outbox.retention.days", "lock timeout");
+    }
+
+    /**
+     * The README's payment status transition table must name every PaymentStatus, so adding a
+     * status without documenting how a payment gets into and out of it fails the build.
+     */
+    @Test
+    void readmeTransitionTableCoversEveryPaymentStatus() throws IOException {
+        String readme = read("README.md");
+        int start = readme.indexOf("### Payment status transitions");
+        assertThat(start).as("transition table section").isNotNegative();
+        int end = readme.indexOf("\n#", start + 1);
+        String table = readme.substring(start, end < 0 ? readme.length() : end);
+
+        for (PaymentStatus status : PaymentStatus.values()) {
+            assertThat(table).as("transition table mentions %s", status).contains("`" + status.name() + "`");
+        }
     }
 
     private static String read(String path) throws IOException {

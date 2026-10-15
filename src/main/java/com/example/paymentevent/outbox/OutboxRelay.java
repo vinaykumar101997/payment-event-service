@@ -4,6 +4,7 @@ import com.example.paymentevent.domain.OutboxEvent;
 import com.example.paymentevent.kafka.PaymentEvent;
 import com.example.paymentevent.kafka.PaymentFailedEvent;
 import com.example.paymentevent.kafka.PaymentProducer;
+import com.example.paymentevent.kafka.ScreeningRequestedEvent;
 import com.example.paymentevent.kafka.TransactionEvent;
 import com.example.paymentevent.repository.OutboxEventRepository;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -119,6 +120,8 @@ public class OutboxRelay {
             case "payments" -> paymentProducer.publishPaymentEvent(read(event, PaymentEvent.class));
             case "transactions" -> paymentProducer.publishTransactionEvent(read(event, TransactionEvent.class));
             case "payment.failed" -> paymentProducer.publishPaymentFailedEvent(read(event, PaymentFailedEvent.class));
+            case "payment.screening.requested" ->
+                    paymentProducer.publishScreeningRequestedEvent(read(event, ScreeningRequestedEvent.class));
             default -> throw new IllegalStateException("No publisher for outbox topic " + event.getTopic());
         }
     }

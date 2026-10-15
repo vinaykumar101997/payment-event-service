@@ -1,6 +1,7 @@
 package com.example.paymentevent.kafka;
 
 import org.apache.kafka.clients.admin.NewTopic;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.kafka.config.TopicBuilder;
@@ -36,5 +37,27 @@ public class KafkaTopicsConfig {
     @Bean
     public NewTopic paymentFailedTopic() {
         return TopicBuilder.name("payment.failed").partitions(3).replicas(1).build();
+    }
+
+    /**
+     * Screening topics (contracts/README.md) are declared only when screening is on, so a
+     * deployment that doesn't use it gets no extra topics on its broker.
+     */
+    @Bean
+    @ConditionalOnProperty(name = "payments.screening.enabled", havingValue = "true")
+    public NewTopic screeningRequestedTopic() {
+        return TopicBuilder.name("payment.screening.requested").partitions(3).replicas(1).build();
+    }
+
+    @Bean
+    @ConditionalOnProperty(name = "payments.screening.enabled", havingValue = "true")
+    public NewTopic screeningCompletedTopic() {
+        return TopicBuilder.name("payment.screening.completed").partitions(3).replicas(1).build();
+    }
+
+    @Bean
+    @ConditionalOnProperty(name = "payments.screening.enabled", havingValue = "true")
+    public NewTopic screeningCompletedDltTopic() {
+        return TopicBuilder.name("payment.screening.completed.DLT").partitions(3).replicas(1).build();
     }
 }

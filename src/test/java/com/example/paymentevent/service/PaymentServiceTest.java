@@ -10,6 +10,7 @@ import com.example.paymentevent.exception.PaymentValidationException;
 import com.example.paymentevent.exception.ServiceBusyException;
 import com.example.paymentevent.kafka.PaymentEvent;
 import com.example.paymentevent.kafka.PaymentFailedEvent;
+import com.example.paymentevent.kafka.ScreeningRequestedEvent;
 import com.example.paymentevent.kafka.TransactionEvent;
 import com.example.paymentevent.outbox.OutboxWriter;
 import com.example.paymentevent.repository.AccountRepository;
@@ -27,8 +28,10 @@ import org.springframework.dao.PessimisticLockingFailureException;
 
 import java.math.BigDecimal;
 import java.sql.SQLException;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -60,7 +63,7 @@ class PaymentServiceTest {
     @BeforeEach
     void setUp() {
         paymentService = new PaymentService(paymentRepository, accountRepository, ledgerEntryRepository,
-                outboxWriter, new MoneyRules(new BigDecimal("1000000.00")), 10);
+                outboxWriter, new MoneyRules(new BigDecimal("1000000.00")), 10, false);
     }
 
     @Test
@@ -284,6 +287,34 @@ class PaymentServiceTest {
 
         assertThat(payment.getStatus()).isEqualTo(PaymentStatus.RECEIVED);
         assertThat(payment.getPaymentId()).isEqualTo("p1");
+    }
+
+    /**
+     * With screening on, a new payment is HELD and the outbox gets a screening request instead
+     * of the "payments" event, so nothing can process it until a verdict or an officer
+     * releases it.
+     */
+    @Test
+    void createPaymentWithScreeningEnabledHoldsItAndRequestsScreeningInsteadOfProcessing() {
+        PaymentService screening = new PaymentService(paymentRepository, accountRepository, ledgerEntryRepository,
+                outboxWriter, new MoneyRules(new BigDecimal("1000000.00")), 10, true);
+        when(paymentRepository.saveAndFlush(any(Payment.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        Payment payment = screening.createPayment("p1", "acc-a", "acc-b", new BigDecimal("50.00"), "USD");
+
+        assertThat(payment.getStatus()).isEqualTo(PaymentStatus.HELD);
+        ArgumentCaptor<ScreeningRequestedEvent> captor = ArgumentCaptor.forClass(ScreeningRequestedEvent.class);
+        verify(outboxWriter).enqueueScreeningRequestedEvent(captor.capture());
+        verify(outboxWriter, never()).enqueuePaymentEvent(any());
+        ScreeningRequestedEvent event = captor.getValue();
+        assertThat(event.schemaVersion()).isEqualTo(1);
+        assertThat(UUID.fromString(event.eventId())).isNotNull();
+        assertThat(event.paymentId()).isEqualTo("p1");
+        assertThat(event.fromAccount()).isEqualTo("acc-a");
+        assertThat(event.toAccount()).isEqualTo("acc-b");
+        assertThat(event.amount()).isEqualTo("50.00");
+        assertThat(event.currency()).isEqualTo("USD");
+        assertThat(Instant.parse(event.createdAt())).isEqualTo(payment.getCreatedAt());
     }
 
     /**

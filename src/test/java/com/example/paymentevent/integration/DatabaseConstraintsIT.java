@@ -12,6 +12,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import java.math.BigDecimal;
 import java.sql.SQLException;
+import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -91,6 +92,25 @@ class DatabaseConstraintsIT extends AbstractIntegrationTest {
                 new Payment(id("PAY"), account.getId(), account.getId(), new BigDecimal("10.00"), "USD")));
 
         assertCheckViolation(thrown, "payments_distinct_accounts");
+    }
+
+    /** V8: status is one of the known values, including the screening ones (HELD, REJECTED). */
+    @Test
+    void paymentStatusMustBeAKnownStatus() {
+        Account from = accountRepository.save(new Account(id("SRC"), new BigDecimal("100.00"), "USD"));
+        Account to = accountRepository.save(new Account(id("DST"), new BigDecimal("0.00"), "USD"));
+        String insert = "INSERT INTO payments (payment_id, from_account, to_account, amount, currency, status) "
+                + "VALUES (?, ?, ?, 10.00, 'USD', ?)";
+
+        for (String status : List.of("RECEIVED", "PROCESSING", "PROCESSED", "FAILED", "POISONED", "HELD", "REJECTED")) {
+            Throwable accepted = attemptAndRollBack(() ->
+                    jdbcTemplate.update(insert, id("PAY"), from.getId(), to.getId(), status));
+            assertThat(accepted).as("status %s should be accepted", status).isNull();
+        }
+        Throwable unknown = attemptAndRollBack(() ->
+                jdbcTemplate.update(insert, id("PAY"), from.getId(), to.getId(), "SETTLED"));
+
+        assertCheckViolation(unknown, "payments_status_known");
     }
 
     private Throwable attemptAndRollBack(Runnable write) {

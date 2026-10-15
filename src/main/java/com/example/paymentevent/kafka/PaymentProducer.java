@@ -36,6 +36,10 @@ public class PaymentProducer {
         send("payment.failed", event.paymentId(), event);
     }
 
+    public void publishScreeningRequestedEvent(ScreeningRequestedEvent event) {
+        send("payment.screening.requested", event.paymentId(), event);
+    }
+
     private void send(String topic, String key, Object value) {
         try {
             kafkaTemplate.send(topic, key, value).get(SEND_TIMEOUT_SECONDS, TimeUnit.SECONDS);

@@ -80,6 +80,11 @@ payments:
   # Base of every problem "type" URI (base + slug, e.g. ...problems.md#invalid-amount). The
   # default resolves to docs/problems.md on GitHub; override per environment.
   problem-base-uri: "${PAYMENTS_PROBLEM_BASE_URI:https://github.com/vinaykumar101997/payment-event-service/blob/main/docs/problems.md#}"
+  screening:
+    # Off by default. When on, a new payment is saved HELD and a payment.screening.requested
+    # event is published instead of the "payments" event; it is processed only after a CLEAR
+    # verdict or an officer release (see README, Screening hold).
+    enabled: false
   processing:
     # Failed non-business processing attempts before a payment is moved to POISONED.
     max-attempts: 10

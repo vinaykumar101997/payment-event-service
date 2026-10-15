@@ -3,6 +3,7 @@ package com.example.paymentevent.outbox;
 import com.example.paymentevent.domain.OutboxEvent;
 import com.example.paymentevent.kafka.PaymentEvent;
 import com.example.paymentevent.kafka.PaymentFailedEvent;
+import com.example.paymentevent.kafka.ScreeningRequestedEvent;
 import com.example.paymentevent.kafka.TransactionEvent;
 import com.example.paymentevent.repository.OutboxEventRepository;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -41,6 +42,11 @@ public class OutboxWriter {
     @Transactional(propagation = Propagation.MANDATORY)
     public void enqueuePaymentFailedEvent(PaymentFailedEvent event) {
         enqueue("payment.failed", event.paymentId(), event);
+    }
+
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void enqueueScreeningRequestedEvent(ScreeningRequestedEvent event) {
+        enqueue("payment.screening.requested", event.paymentId(), event);
     }
 
     private void enqueue(String topic, String key, Object event) {

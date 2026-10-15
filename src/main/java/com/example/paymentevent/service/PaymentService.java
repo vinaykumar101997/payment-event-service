@@ -14,6 +14,7 @@ import com.example.paymentevent.exception.ServiceBusyException;
 import com.example.paymentevent.exception.UnknownAccountException;
 import com.example.paymentevent.kafka.PaymentEvent;
 import com.example.paymentevent.kafka.PaymentFailedEvent;
+import com.example.paymentevent.kafka.ScreeningRequestedEvent;
 import com.example.paymentevent.kafka.TransactionEvent;
 import com.example.paymentevent.outbox.OutboxWriter;
 import com.example.paymentevent.repository.AccountRepository;
@@ -52,17 +53,20 @@ public class PaymentService {
     private final OutboxWriter outboxWriter;
     private final MoneyRules moneyRules;
     private final int maxProcessingAttempts;
+    private final boolean screeningEnabled;
 
     public PaymentService(PaymentRepository paymentRepository, AccountRepository accountRepository,
                           LedgerEntryRepository ledgerEntryRepository, OutboxWriter outboxWriter,
                           MoneyRules moneyRules,
-                          @Value("${payments.processing.max-attempts:10}") int maxProcessingAttempts) {
+                          @Value("${payments.processing.max-attempts:10}") int maxProcessingAttempts,
+                          @Value("${payments.screening.enabled:false}") boolean screeningEnabled) {
         this.paymentRepository = paymentRepository;
         this.accountRepository = accountRepository;
         this.ledgerEntryRepository = ledgerEntryRepository;
         this.outboxWriter = outboxWriter;
         this.moneyRules = moneyRules;
         this.maxProcessingAttempts = maxProcessingAttempts;
+        this.screeningEnabled = screeningEnabled;
     }
 
     /**
@@ -88,15 +92,22 @@ public class PaymentService {
      * AccountRepository), so it waits only on an outside FOR UPDATE - a script or manual fix.
      * If that wait passes lock_timeout (55P03) the account is busy, not the request wrong: it
      * becomes ServiceBusyException (503 with Retry-After) and the client can send it again.
+     *
+     * With payments.screening.enabled the payment is saved HELD instead, and the outbox gets a
+     * payment.screening.requested event in place of the "payments" one, so no consumer can
+     * process it until screening (or an officer) releases it.
      */
     @Transactional
     public Payment createPayment(String paymentId, String fromAccount, String toAccount,
                                   BigDecimal amount, String currency) {
         moneyRules.validate(amount, currency);
 
-        Payment payment;
+        Payment payment = new Payment(paymentId, fromAccount, toAccount, amount, currency);
+        if (screeningEnabled) {
+            payment.holdForScreening();
+        }
         try {
-            payment = paymentRepository.saveAndFlush(new Payment(paymentId, fromAccount, toAccount, amount, currency));
+            payment = paymentRepository.saveAndFlush(payment);
         } catch (DataIntegrityViolationException ex) {
             String sqlState = sqlStateOf(ex);
             if (UNIQUE_VIOLATION.equals(sqlState)) {
@@ -113,7 +124,12 @@ public class PaymentService {
             }
             throw ex;
         }
-        outboxWriter.enqueuePaymentEvent(PaymentEvent.from(payment));
+        if (screeningEnabled) {
+            outboxWriter.enqueueScreeningRequestedEvent(ScreeningRequestedEvent.from(payment));
+            log.info("Payment {} held for screening", paymentId);
+        } else {
+            outboxWriter.enqueuePaymentEvent(PaymentEvent.from(payment));
+        }
         return payment;
     }
 

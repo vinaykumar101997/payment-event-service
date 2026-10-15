@@ -159,6 +159,28 @@ Before Stage 1, the same command on a clean checkout of `main` (commit 964449f) 
 
 The badge above shows the latest GitHub Actions run of the same command.
 
+## Screening hold
+
+Off by default (`payments.screening.enabled=false`); with it off, everything above is unchanged. When it is on, a new payment is saved as HELD and the service publishes a `payment.screening.requested` event instead of the `payments` event, so nothing processes the payment until it is released. The event formats are JSON Schemas in [`contracts/`](contracts/README.md).
+
+### Payment status transitions
+
+| From | Trigger | To | Also | Implemented |
+|---|---|---|---|---|
+| (new) | `POST /payments`, screening off | `RECEIVED` | outbox `payments` | yes |
+| (new) | `POST /payments`, screening on | `HELD` | outbox `payment.screening.requested` | yes (S2) |
+| `HELD` | verdict CLEAR | `RECEIVED` | outbox `payments` | not yet (S3) |
+| `HELD` | officer release | `RECEIVED` | outbox `payments` | not yet (S5) |
+| `HELD` | verdict FLAG or ERROR | `HELD` | none | not yet (S3) |
+| `HELD` | verdict REJECT | `REJECTED` | outbox `payment.failed` | not yet (S3) |
+| `HELD` | officer reject | `REJECTED` | outbox `payment.failed` | not yet (S5) |
+| `RECEIVED` | consumer claims it | `PROCESSING` | none | yes |
+| `PROCESSING` | money moved | `PROCESSED` | ledger entries, outbox `transactions` | yes |
+| `PROCESSING` | business rule failed (funds, currency, account), or the event doesn't match the stored row | `FAILED` | outbox `payment.failed` | yes |
+| `RECEIVED` | `payments.processing.max-attempts` non-business failures | `POISONED` | message to `payments.DLT` | yes |
+
+`PROCESSED`, `FAILED`, `POISONED` and `REJECTED` are terminal. From `RECEIVED` on, a released payment follows exactly the same path as one created with screening off. Postgres also enforces the list of statuses (constraint `payments_status_known`, migration V8).
+
 ## API
 
 | Method | Path | Purpose |
