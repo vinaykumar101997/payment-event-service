@@ -105,6 +105,24 @@ class ProjectDocsTest {
         assertThat(readme.substring(roadmap)).doesNotContain("A fraud check before money moves");
     }
 
+    /**
+     * T10: the compose walkthrough was run by hand; the book records it, and the README no
+     * longer says it wasn't run and covers CLEAR, FLAG, release and reject.
+     */
+    @Test
+    void screeningWalkthroughWasRunAndRecorded() throws IOException {
+        String book = read("docs/PROJECT_BOOK.md");
+        int start = book.indexOf("## Demo Walkthrough");
+        assertThat(start).as("Demo Walkthrough section in the book").isNotNegative();
+        assertThat(book.substring(start)).contains("docker-compose", "kafka-console-producer", "/release", "/reject");
+
+        String readme = read("README.md");
+        assertThat(readme).doesNotContain("were not run as part of the verification");
+        int run = readme.indexOf("### Running with screening on");
+        String walkthrough = readme.substring(run, readme.indexOf("\n### ", run + 1));
+        assertThat(walkthrough).contains("\"verdict\":\"CLEAR\"", "\"verdict\":\"FLAG\"", "/release", "/reject");
+    }
+
     private static String read(String path) throws IOException {
         return Files.readString(Path.of(path), StandardCharsets.UTF_8);
     }

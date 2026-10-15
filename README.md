@@ -225,21 +225,50 @@ Settings (environment variable form in brackets):
 - `payments.screening.timeout` (`PAYMENTS_SCREENING_TIMEOUT`): ISO-8601 duration after which a HELD payment is marked overdue. Default `PT1H`.
 - `payments.screening.overdue-sweep-interval-ms`: how often the overdue check runs. Default 60000.
 
-With docker-compose, export `PAYMENTS_SCREENING_ENABLED=true` (and `PAYMENTS_API_KEY`) before `docker-compose up`; the compose file passes it through. Without the screening service, you can play its part with Kafka's console producer. The following commands were not run as part of the verification below; the same flow is what `ScreeningEndToEndIT` tests:
+Without the screening service you can play its part with Kafka's console producer. These steps were run end to end on 2026-10-15 (Windows 11, Git Bash, Docker Compose v5.5.1); the full transcript is in the [project book](docs/PROJECT_BOOK.md#demo-walkthrough). Run them all in one terminal: the compose file requires `PAYMENTS_API_KEY` for every `docker-compose` command, not only `up`.
 
 ```bash
-curl -X POST localhost:8080/payments -H "X-API-Key: $PAYMENTS_API_KEY" -H "Content-Type: application/json" -d '{
-  "paymentId": "p-2", "fromAccount": "ACC-1001", "toAccount": "ACC-1002",
-  "amount": 10.00, "currency": "USD"
-}'                                    # status HELD
+export PAYMENTS_API_KEY=$(openssl rand -hex 32) PAYMENTS_SCREENING_ENABLED=true
+docker-compose up --build -d           # wait for "Started PaymentEventServiceApplication" in: docker-compose logs app
+# Git Bash on Windows only: stop it rewriting /opt/... paths in the docker-compose exec commands below
+export MSYS_NO_PATHCONV=1
 
-docker-compose exec kafka /opt/kafka/bin/kafka-console-producer.sh --bootstrap-server localhost:9092 \
-  --topic payment.screening.completed --property parse.key=true --property key.separator='|'
-p-2|{"schemaVersion":1,"eventId":"6a0c8f1e-1d2b-4c3d-9e4f-5a6b7c8d9e0f","paymentId":"p-2","verdict":"FLAG","reasons":["name match"],"decidedAt":"2026-10-15T12:00:00Z","screeningRunId":"manual-1"}
+# 1. A payment that screening clears
+curl -s -X POST localhost:8080/payments -H "X-API-Key: $PAYMENTS_API_KEY" -H "Content-Type: application/json" \
+  -d '{"paymentId": "demo-clear", "fromAccount": "ACC-1001", "toAccount": "ACC-1002", "amount": 10.00, "currency": "USD"}'
+# -> "status":"HELD"; the screening request is on payment.screening.requested:
+docker-compose exec -T kafka /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 \
+  --topic payment.screening.requested --from-beginning --property print.key=true --property key.separator="|" --max-messages 1 --timeout-ms 10000
+echo 'demo-clear|{"schemaVersion":1,"eventId":"4f3c2b1a-0e9d-4c8b-9a7f-6e5d4c3b2a10","paymentId":"demo-clear","verdict":"CLEAR","reasons":[],"riskScore":0.04,"decidedAt":"2026-10-15T12:00:00Z","screeningRunId":"manual-1"}' \
+  | docker-compose exec -T kafka /opt/kafka/bin/kafka-console-producer.sh --bootstrap-server localhost:9092 \
+      --topic payment.screening.completed --property parse.key=true --property key.separator="|"
+sleep 3                                # processing is asynchronous: RECEIVED first, PROCESSED once the consumer has run
+curl -s -H "X-API-Key: $PAYMENTS_API_KEY" localhost:8080/payments/demo-clear          # -> "status":"PROCESSED"
 
-curl -X POST localhost:8080/payments/p-2/release -H "X-API-Key: $PAYMENTS_API_KEY" \
+# 2. Two payments that screening flags, then an officer releases one and rejects the other
+curl -s -X POST localhost:8080/payments -H "X-API-Key: $PAYMENTS_API_KEY" -H "Content-Type: application/json" \
+  -d '{"paymentId": "demo-release", "fromAccount": "ACC-1001", "toAccount": "ACC-1002", "amount": 20.00, "currency": "USD"}'
+curl -s -X POST localhost:8080/payments -H "X-API-Key: $PAYMENTS_API_KEY" -H "Content-Type: application/json" \
+  -d '{"paymentId": "demo-reject", "fromAccount": "ACC-1001", "toAccount": "ACC-1002", "amount": 30.00, "currency": "USD"}'
+printf '%s\n' \
+  'demo-release|{"schemaVersion":1,"eventId":"5a4d3c2b-1f0e-4d9c-8b7a-6f5e4d3c2b11","paymentId":"demo-release","verdict":"FLAG","reasons":["name match"],"riskScore":0.71,"decidedAt":"2026-10-15T12:01:00Z","screeningRunId":"manual-2"}' \
+  'demo-reject|{"schemaVersion":1,"eventId":"6b5e4d3c-2a1f-4e0d-9c8b-7a6f5e4d3c12","paymentId":"demo-reject","verdict":"FLAG","reasons":["high-risk corridor"],"riskScore":0.88,"decidedAt":"2026-10-15T12:01:00Z","screeningRunId":"manual-2"}' \
+  | docker-compose exec -T kafka /opt/kafka/bin/kafka-console-producer.sh --bootstrap-server localhost:9092 \
+      --topic payment.screening.completed --property parse.key=true --property key.separator="|"
+sleep 3
+curl -s -H "X-API-Key: $PAYMENTS_API_KEY" "localhost:8080/payments?status=HELD"       # both, with reasons and riskScore
+curl -s -X POST localhost:8080/payments/demo-release/release -H "X-API-Key: $PAYMENTS_API_KEY" \
   -H "Content-Type: application/json" -d '{"officer": "alice", "note": "checked, not the listed person"}'
+curl -s -X POST localhost:8080/payments/demo-reject/reject -H "X-API-Key: $PAYMENTS_API_KEY" \
+  -H "Content-Type: application/json" -d '{"officer": "carol", "note": "customer confirmed fraud"}'
+sleep 3
+curl -s -H "X-API-Key: $PAYMENTS_API_KEY" localhost:8080/payments/demo-release        # -> "status":"PROCESSED"
+curl -s -H "X-API-Key: $PAYMENTS_API_KEY" localhost:8080/payments/demo-reject         # -> "status":"REJECTED"
+
+docker-compose down -v                 # stop and delete the demo data
 ```
+
+The console producer reads verdicts from standard input, one `key|json` per line; `-T` lets `docker-compose exec` take the piped input. The consumer step prints the one screening request on a fresh stack (`--max-messages 1`); on a stack with older payments, drop `--max-messages 1` and it stops after 10 seconds with a `TimeoutException` message, which is expected. Status changes after a verdict or a release are asynchronous (outbox relay, then the payments consumer), hence the `sleep 3` lines.
 
 ### Not done yet
 
