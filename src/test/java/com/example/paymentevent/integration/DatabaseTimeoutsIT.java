@@ -29,10 +29,32 @@ class DatabaseTimeoutsIT extends AbstractIntegrationTest {
     @Autowired
     private TransactionTemplate transactionTemplate;
 
+    @Autowired
+    private MigrationSessionRecorder migrationSession;
+
     @Test
     void pooledConnectionsCarryLockAndStatementTimeouts() {
         assertThat(jdbcTemplate.queryForObject("SHOW lock_timeout", String.class)).isEqualTo("5s");
         assertThat(jdbcTemplate.queryForObject("SHOW statement_timeout", String.class)).isEqualTo("30s");
+    }
+
+    /**
+     * A migration that rewrites a large table can legitimately run for minutes; the 30s
+     * statement_timeout meant for request and consumer queries would kill it half-way through
+     * start-up. Flyway gets its own connection with no statement_timeout, but keeps
+     * lock_timeout so a migration can't queue forever behind live traffic. Checked on both
+     * sides: the migration session, and every pooled application connection afterwards
+     * (a session SET on a pooled connection would leak into the pool).
+     */
+    @Test
+    void migrationsRunWithoutStatementTimeoutWhileApplicationConnectionsKeepBothTimeouts() {
+        assertThat(migrationSession.statementTimeout()).isEqualTo("0");
+        assertThat(migrationSession.lockTimeout()).isEqualTo("5s");
+
+        for (int i = 0; i < 20; i++) {
+            assertThat(jdbcTemplate.queryForObject("SHOW statement_timeout", String.class)).isEqualTo("30s");
+            assertThat(jdbcTemplate.queryForObject("SHOW lock_timeout", String.class)).isEqualTo("5s");
+        }
     }
 
     /**

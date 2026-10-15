@@ -28,7 +28,7 @@ import java.util.UUID;
  * containers across test classes; Testcontainers' Ryuk reaper cleans them up on JVM exit.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@Import(FaultInjectingPaymentProducer.class)
+@Import({FaultInjectingPaymentProducer.class, MigrationSessionRecorder.class})
 public abstract class AbstractIntegrationTest {
 
     static final PostgreSQLContainer<?> POSTGRES =
