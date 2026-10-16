@@ -7,6 +7,11 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -16,20 +21,81 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class ProjectDocsTest {
 
-    @Test
-    void projectBookHasAllRequiredSections() throws IOException {
-        String book = read("docs/PROJECT_BOOK.md");
+    /**
+     * Words that describe how the work was organised rather than what the code does. Matched
+     * case-insensitively on word boundaries. Excluded on purpose: "scheduled task" (a Spring
+     * scheduling term) and "status report" (an ISO 20022 pacs.002 message); "task" or "report"
+     * inside a longer identifier such as {@code TaskScheduler} never matches a word boundary.
+     */
+    private static final Pattern PROCESS_WORDS = Pattern.compile(
+            "\\bstage[ -]?[12]\\b"
+                    + "|(?<!scheduled )\\btasks?\\b"
+                    + "|\\binterviews?\\b"
+                    + "|\\bQ ?(?:&|and) ?A\\b"
+                    + "|(?<!status )\\breports?\\b",
+            Pattern.CASE_INSENSITIVE);
 
-        assertThat(book).contains(
-                "## 1. Overview and architecture",
-                "## 2. Decisions log",
-                "## 3. Task Log",
-                "## 4. Test and Results Ledger",
-                "## 5. Failure stories",
-                "## 6. Interview Q and A",
-                "## 7. Known gaps and next steps",
-                "## 8. Glossary");
-        assertThat(book).contains("| Date | Command | Result line | Commit |");
+    /** Work-item ids such as T0 to T12 and S1 to S8. Case-sensitive, so "t2" in prose is not one. */
+    private static final Pattern WORK_ITEM_IDS = Pattern.compile("\\b(?:T(?:1[0-2]|[0-9])|S[1-8])\\b");
+
+    @Test
+    void designDocHasAllRequiredSections() throws IOException {
+        Path design = Path.of("docs/DESIGN.md");
+        assertThat(design).as("docs/DESIGN.md").exists();
+        String doc = read(design.toString());
+
+        assertThat(doc).contains(
+                "\n## Overview\n",
+                "\n## Design decisions\n",
+                "\n## Failure cases and fixes\n",
+                "\n## Verification\n",
+                "\n## Demo walkthrough\n",
+                "\n## Known limitations\n");
+    }
+
+    @Test
+    void readmeLinksToTheDesignDocAndNotToTheOldBook() throws IOException {
+        String readme = read("README.md");
+
+        assertThat(readme).contains("](docs/DESIGN.md");
+        assertThat(readme).doesNotContainIgnoringCase("PROJECT_BOOK");
+    }
+
+    /** Docs describe the service, not the process that built it. */
+    @Test
+    void docsDoNotTalkAboutHowTheWorkWasOrganised() throws IOException {
+        List<Path> files = new ArrayList<>();
+        files.add(Path.of("README.md"));
+        try (Stream<Path> docs = Files.walk(Path.of("docs"))) {
+            docs.filter(f -> f.toString().endsWith(".md")).forEach(files::add);
+        }
+
+        List<String> hits = new ArrayList<>();
+        for (Path file : files) {
+            String[] lines = read(file.toString()).split("\n", -1);
+            for (int i = 0; i < lines.length; i++) {
+                for (Pattern pattern : List.of(PROCESS_WORDS, WORK_ITEM_IDS)) {
+                    Matcher m = pattern.matcher(lines[i]);
+                    while (m.find()) {
+                        hits.add(file + ":" + (i + 1) + " '" + m.group() + "'");
+                    }
+                }
+            }
+        }
+        assertThat(hits).as("process words in docs").isEmpty();
+    }
+
+    @Test
+    void processWordPatternSkipsLegitimateUses() {
+        assertThat(PROCESS_WORDS.matcher("runs as a scheduled task every hour").find()).isFalse();
+        assertThat(PROCESS_WORDS.matcher("return pacs.002 status reports").find()).isFalse();
+        assertThat(PROCESS_WORDS.matcher("uses `TaskScheduler` and `ReportBuilder`").find()).isFalse();
+        assertThat(PROCESS_WORDS.matcher("fixed in Stage 2").find()).isTrue();
+        assertThat(PROCESS_WORDS.matcher("branch fix/payment-stage1").find()).isTrue();
+        assertThat(PROCESS_WORDS.matcher("see the follow-up report").find()).isTrue();
+        assertThat(PROCESS_WORDS.matcher("Interview Q&A").find()).isTrue();
+        assertThat(WORK_ITEM_IDS.matcher("timeout PT1H, found in T3").find()).isTrue();
+        assertThat(WORK_ITEM_IDS.matcher("timeout PT1H").find()).isFalse();
     }
 
     @Test
@@ -42,9 +108,9 @@ class ProjectDocsTest {
     }
 
     /**
-     * The README may only claim what the code does. These five limitations were fixed in
-     * Stage 1 (T2 to T6), so the Known limitations section must no longer list them, and must
-     * point at what replaced them.
+     * The README may only claim what the code does. These five limitations have been fixed, so
+     * the Known limitations section must no longer list them, and must point at what replaced
+     * them.
      */
     @Test
     void readmeKnownLimitationsNoLongerListFixedProblems() throws IOException {
@@ -81,9 +147,9 @@ class ProjectDocsTest {
     }
 
     /**
-     * S8: the README's screening section covers the topics, the switch, how to run it and
-     * what isn't done; every transition is implemented; the roadmap no longer lists the
-     * screening hold as future work.
+     * The README's screening section covers the topics, the switch, how to run it and what
+     * isn't done; every transition is implemented; the roadmap no longer lists the screening
+     * hold as future work.
      */
     @Test
     void readmeDocumentsTheScreeningHold() throws IOException {
@@ -106,15 +172,17 @@ class ProjectDocsTest {
     }
 
     /**
-     * T10: the compose walkthrough was run by hand; the book records it, and the README no
+     * The compose walkthrough was run by hand; the design doc records it, and the README no
      * longer says it wasn't run and covers CLEAR, FLAG, release and reject.
      */
     @Test
     void screeningWalkthroughWasRunAndRecorded() throws IOException {
-        String book = read("docs/PROJECT_BOOK.md");
-        int start = book.indexOf("## Demo Walkthrough");
-        assertThat(start).as("Demo Walkthrough section in the book").isNotNegative();
-        assertThat(book.substring(start)).contains("docker-compose", "kafka-console-producer", "/release", "/reject");
+        String design = read("docs/DESIGN.md");
+        int start = design.indexOf("## Demo walkthrough");
+        assertThat(start).as("Demo walkthrough section in docs/DESIGN.md").isNotNegative();
+        int end = design.indexOf("\n## ", start + 1);
+        assertThat(design.substring(start, end < 0 ? design.length() : end))
+                .contains("docker-compose", "kafka-console-producer", "/release", "/reject");
 
         String readme = read("README.md");
         assertThat(readme).doesNotContain("were not run as part of the verification");
@@ -124,7 +192,7 @@ class ProjectDocsTest {
     }
 
     /**
-     * T11: Known limitations says the officer name is self-asserted under a shared key, so
+     * Known limitations says the officer name is self-asserted under a shared key, so
      * decisions are not individually authenticated, and what a real system would use.
      */
     @Test

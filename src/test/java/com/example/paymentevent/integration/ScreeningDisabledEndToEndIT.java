@@ -24,8 +24,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
 /**
- * S7, screening off (the default): a payment goes RECEIVED -> PROCESSED exactly as before
- * Stage 2. No hold, no screening request, no verdict listener, and the ledger reconciles.
+ * Screening off (the default): a payment goes RECEIVED -> PROCESSED exactly as it did before
+ * the screening hold existed. No hold, no screening request, no verdict listener, and the
+ * ledger reconciles.
  */
 class ScreeningDisabledEndToEndIT extends AbstractIntegrationTest {
 

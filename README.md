@@ -40,9 +40,11 @@ What the integration tests prove, against real Postgres and Kafka:
 | A message whose amount disagrees with the saved payment | No money moves, the payment is failed for investigation |
 | Ledger reconciliation after concurrent workloads | Every payment nets to zero, every balance matches its entries |
 
-78 unit tests and 78 integration tests in total (see Verification).
+81 unit tests and 78 integration tests in total (see Verification).
 
 ## Design decisions
+
+The short version is below. [docs/DESIGN.md](docs/DESIGN.md) has the reasoning behind each decision, the bugs found so far and the tests that guard them, and the recorded screening walkthrough.
 
 **Asking twice never pays twice.** If the same payment request arrives again, the service recognises it and returns the original result.
 *Technical:* the payment id is the primary key. A SHA-256 hash of the request separates a genuine retry (409) from a reused id with different details (422). On the Kafka side, a conditional `UPDATE ... WHERE status = 'RECEIVED'` claims each payment exactly once.
@@ -147,16 +149,14 @@ The integration tests start real Postgres and Kafka containers once per test run
 
 ## Verification
 
-Last full run: 2026-10-15, `./mvnw -B clean verify` on branch `fix/payment-stage2` (commit 769cfc7), Windows 11, JDK 17.0.12, Docker 29.8.1:
+Last full run: 2026-10-15, `./mvnw -B clean verify`, Windows 11, JDK 17.0.12, Docker 29.8.1:
 
 ```
-[INFO] Tests run: 78, Failures: 0, Errors: 0, Skipped: 0   (unit, surefire)
+[INFO] Tests run: 81, Failures: 0, Errors: 0, Skipped: 0   (unit, surefire)
 [INFO] Tests run: 78, Failures: 0, Errors: 0, Skipped: 0   (integration, failsafe)
 [INFO] BUILD SUCCESS
-[INFO] Total time:  03:28 min
+[INFO] Total time:  03:21 min
 ```
-
-At the end of Stage 2 (commit a8dbd7f) it gave 75 unit and 72 integration tests in 02:36 min. At the end of Stage 1 (commit a112f52) the same command gave 49 unit and 44 integration tests in 03:11 min. Before Stage 1, on a clean checkout of `main` (commit 964449f), it gave 36 unit and 38 integration tests, 0 failures, in 02:38 min.
 
 The badge above shows the latest GitHub Actions run of the same command.
 
@@ -225,7 +225,7 @@ Settings (environment variable form in brackets):
 - `payments.screening.timeout` (`PAYMENTS_SCREENING_TIMEOUT`): ISO-8601 duration after which a HELD payment is marked overdue. Default `PT1H`.
 - `payments.screening.overdue-sweep-interval-ms`: how often the overdue check runs. Default 60000.
 
-Without the screening service you can play its part with Kafka's console producer. These steps were run end to end on 2026-10-15 (Windows 11, Git Bash, Docker Compose v5.5.1); the full transcript is in the [project book](docs/PROJECT_BOOK.md#demo-walkthrough). Run them all in one terminal: the compose file requires `PAYMENTS_API_KEY` for every `docker-compose` command, not only `up`.
+Without the screening service you can play its part with Kafka's console producer. These steps were run end to end on 2026-10-15 (Windows 11, Git Bash, Docker Compose v5.5.1); the transcript is in [docs/DESIGN.md](docs/DESIGN.md#demo-walkthrough). Run them all in one terminal: the compose file requires `PAYMENTS_API_KEY` for every `docker-compose` command, not only `up`.
 
 ```bash
 export PAYMENTS_API_KEY=$(openssl rand -hex 32) PAYMENTS_SCREENING_ENABLED=true
