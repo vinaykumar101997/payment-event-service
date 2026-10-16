@@ -6,6 +6,9 @@ WORKDIR /build
 COPY pom.xml .
 RUN mvn -q dependency:go-offline
 COPY src ./src
+# contracts/ is a resource directory in pom.xml (the screening JSON Schemas); without it the
+# jar has no schemas and the app fails at start-up. DockerfileTest checks this list.
+COPY contracts ./contracts
 RUN mvn -q -DskipTests package
 
 # Runtime stage: JRE only (no Maven/JDK), non-root user.

@@ -7,8 +7,10 @@ import com.example.paymentevent.domain.PaymentStatus;
 import com.example.paymentevent.exception.DuplicatePaymentException;
 import com.example.paymentevent.exception.InvalidAmountException;
 import com.example.paymentevent.exception.PaymentValidationException;
+import com.example.paymentevent.exception.ServiceBusyException;
 import com.example.paymentevent.kafka.PaymentEvent;
 import com.example.paymentevent.kafka.PaymentFailedEvent;
+import com.example.paymentevent.kafka.ScreeningRequestedEvent;
 import com.example.paymentevent.kafka.TransactionEvent;
 import com.example.paymentevent.outbox.OutboxWriter;
 import com.example.paymentevent.repository.AccountRepository;
@@ -22,11 +24,14 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.PessimisticLockingFailureException;
 
 import java.math.BigDecimal;
 import java.sql.SQLException;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -58,7 +63,7 @@ class PaymentServiceTest {
     @BeforeEach
     void setUp() {
         paymentService = new PaymentService(paymentRepository, accountRepository, ledgerEntryRepository,
-                outboxWriter, new MoneyRules(new BigDecimal("1000000.00")), 10);
+                outboxWriter, new MoneyRules(new BigDecimal("1000000.00")), 10, false);
     }
 
     @Test
@@ -285,6 +290,34 @@ class PaymentServiceTest {
     }
 
     /**
+     * With screening on, a new payment is HELD and the outbox gets a screening request instead
+     * of the "payments" event, so nothing can process it until a verdict or an officer
+     * releases it.
+     */
+    @Test
+    void createPaymentWithScreeningEnabledHoldsItAndRequestsScreeningInsteadOfProcessing() {
+        PaymentService screening = new PaymentService(paymentRepository, accountRepository, ledgerEntryRepository,
+                outboxWriter, new MoneyRules(new BigDecimal("1000000.00")), 10, true);
+        when(paymentRepository.saveAndFlush(any(Payment.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        Payment payment = screening.createPayment("p1", "acc-a", "acc-b", new BigDecimal("50.00"), "USD");
+
+        assertThat(payment.getStatus()).isEqualTo(PaymentStatus.HELD);
+        ArgumentCaptor<ScreeningRequestedEvent> captor = ArgumentCaptor.forClass(ScreeningRequestedEvent.class);
+        verify(outboxWriter).enqueueScreeningRequestedEvent(captor.capture());
+        verify(outboxWriter, never()).enqueuePaymentEvent(any());
+        ScreeningRequestedEvent event = captor.getValue();
+        assertThat(event.schemaVersion()).isEqualTo(1);
+        assertThat(UUID.fromString(event.eventId())).isNotNull();
+        assertThat(event.paymentId()).isEqualTo("p1");
+        assertThat(event.fromAccount()).isEqualTo("acc-a");
+        assertThat(event.toAccount()).isEqualTo("acc-b");
+        assertThat(event.amount()).isEqualTo("50.00");
+        assertThat(event.currency()).isEqualTo("USD");
+        assertThat(Instant.parse(event.createdAt())).isEqualTo(payment.getCreatedAt());
+    }
+
+    /**
      * The "payments" event is written to the outbox inside createPayment()'s transaction,
      * so the Payment row and the intent to publish it commit (or roll back) together.
      */
@@ -369,6 +402,34 @@ class PaymentServiceTest {
         // Still thrown (it's a fault, so the message goes to the DLT), but the payment's
         // FAILED outcome is announced like any other.
         assertThat(capturePaymentFailedEvent().reason()).contains("does not match");
+    }
+
+    /**
+     * The insert's foreign-key check waited past lock_timeout (SQLState 55P03) on an account
+     * row someone holds FOR UPDATE: the request is fine, the account is busy. It becomes a
+     * retryable 503 (ServiceBusyException), and nothing is enqueued.
+     */
+    @Test
+    void createPaymentTranslatesLockTimeoutToServiceBusy() {
+        PessimisticLockingFailureException lockTimeout = new PessimisticLockingFailureException("could not execute statement",
+                new SQLException("canceling statement due to lock timeout", "55P03"));
+        when(paymentRepository.saveAndFlush(any(Payment.class))).thenThrow(lockTimeout);
+
+        assertThatThrownBy(() -> paymentService.createPayment("p1", "acc-a", "acc-b", new BigDecimal("50.00"), "USD"))
+                .isInstanceOf(ServiceBusyException.class)
+                .hasCause(lockTimeout);
+        verifyNoInteractions(outboxWriter);
+    }
+
+    /** Other locking failures (here a statement timeout, 57014) are not "busy" and pass through unchanged. */
+    @Test
+    void createPaymentRethrowsOtherLockingFailuresUnchanged() {
+        PessimisticLockingFailureException statementTimeout = new PessimisticLockingFailureException("query canceled",
+                new SQLException("canceling statement due to statement timeout", "57014"));
+        when(paymentRepository.saveAndFlush(any(Payment.class))).thenThrow(statementTimeout);
+
+        assertThatThrownBy(() -> paymentService.createPayment("p1", "acc-a", "acc-b", new BigDecimal("50.00"), "USD"))
+                .isSameAs(statementTimeout);
     }
 
     private static DataIntegrityViolationException constraintViolation(String sqlState, String constraintName) {

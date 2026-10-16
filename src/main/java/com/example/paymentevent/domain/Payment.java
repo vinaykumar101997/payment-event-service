@@ -163,6 +163,38 @@ public class Payment implements Persistable<String> {
         return failureReason;
     }
 
+    /**
+     * Holds a payment that hasn't been saved yet for screening (PaymentService.createPayment).
+     * Only from RECEIVED: holding anything that has started processing would hide money movement.
+     */
+    public void holdForScreening() {
+        if (status != PaymentStatus.RECEIVED || !isNew) {
+            throw new IllegalStateException("Only a new RECEIVED payment can be held, not " + paymentId
+                    + " in status " + status);
+        }
+        this.status = PaymentStatus.HELD;
+    }
+
+    /** HELD -> RECEIVED: screening cleared it (or an officer released it); normal processing follows. */
+    public void releaseFromHold() {
+        requireHeld("release");
+        this.status = PaymentStatus.RECEIVED;
+    }
+
+    /** HELD -> REJECTED (terminal): screening or an officer rejected it. No money moved. */
+    public void reject(String reason) {
+        requireHeld("reject");
+        this.status = PaymentStatus.REJECTED;
+        this.failureReason = reason;
+        this.processedAt = Instant.now();
+    }
+
+    private void requireHeld(String action) {
+        if (status != PaymentStatus.HELD) {
+            throw new IllegalStateException("Cannot " + action + " payment " + paymentId + " in status " + status);
+        }
+    }
+
     public void markProcessed() {
         this.status = PaymentStatus.PROCESSED;
         this.processedAt = Instant.now();

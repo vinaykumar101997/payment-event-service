@@ -8,6 +8,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 
+import java.sql.SQLException;
+
 /**
  * Deliberately thin: PaymentService.process() owns the entire DB transaction, including
  * writing the "transactions" event to the outbox, so this listener never publishes to
@@ -18,11 +20,19 @@ import org.springframework.stereotype.Component;
  * attempt: it's recorded against the payment and rethrown so Kafka's error handler retries
  * it - unless that attempt was the last one allowed, in which case the payment is now
  * POISONED and a non-retryable PaymentPoisonedException sends the message to the DLT.
+ *
+ * Lock-acquisition timeouts are the exception to the counting. Postgres raises SQLState 55P03
+ * (lock_not_available) when lock_timeout expires while waiting for an account row another
+ * transaction holds: the account is busy, the payment itself is fine. It is rethrown so Kafka
+ * retries it (and PaymentSweeper picks it up again if every retry is spent), but it is not
+ * counted - otherwise a busy enough account could push a valid payment to POISONED. Any other
+ * error, statement_timeout (57014) included, still counts.
  */
 @Component
 public class PaymentConsumer {
 
     private static final Logger log = LoggerFactory.getLogger(PaymentConsumer.class);
+    private static final String LOCK_NOT_AVAILABLE = "55P03";
 
     private final PaymentService paymentService;
 
@@ -37,11 +47,28 @@ public class PaymentConsumer {
         } catch (PaymentValidationException ex) {
             throw ex;
         } catch (RuntimeException ex) {
+            if (isLockTimeout(ex)) {
+                log.warn("Payment {} hit a lock timeout on a busy account; retrying without counting an attempt",
+                        event.paymentId());
+                throw ex;
+            }
             if (recordFailedAttempt(event.paymentId(), ex)) {
                 throw new PaymentPoisonedException(event.paymentId(), ex);
             }
             throw ex;
         }
+    }
+
+    static boolean isLockTimeout(Throwable error) {
+        for (Throwable t = error; t != null; t = t.getCause()) {
+            if (t instanceof SQLException sqlException && LOCK_NOT_AVAILABLE.equals(sqlException.getSQLState())) {
+                return true;
+            }
+            if (t.getCause() == t) {
+                break;
+            }
+        }
+        return false;
     }
 
     /**

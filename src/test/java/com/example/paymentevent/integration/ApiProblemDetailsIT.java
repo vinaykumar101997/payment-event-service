@@ -26,7 +26,9 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class ApiProblemDetailsIT extends AbstractIntegrationTest {
 
-    private static final String TYPE_BASE = "https://example.com/problems/";
+    /** The default payments.problem-base-uri: each type resolves to its section of docs/problems.md. */
+    private static final String TYPE_BASE =
+            "https://github.com/vinaykumar101997/payment-event-service/blob/main/docs/problems.md#";
 
     @Autowired
     private TestRestTemplate restTemplate;
@@ -148,6 +150,22 @@ class ApiProblemDetailsIT extends AbstractIntegrationTest {
                 post(new PaymentRequest(id("PAY"), from.getId(), to.getId(), new BigDecimal("1000000.01"), "USD")),
                 HttpStatus.BAD_REQUEST, "invalid-amount", "/payments");
         assertThat(problem.path("detail").asText()).contains("exceeds the maximum");
+    }
+
+    /** JPY has its own cap (150,000,000 in tests); USD uses the 1,000,000.00 default. */
+    @Test
+    void sameAmountIsAcceptedInJpyAndRejectedInUsd() throws Exception {
+        Account jpyFrom = accountRepository.save(new Account(id("SRC"), new BigDecimal("10000000"), "JPY"));
+        Account jpyTo = accountRepository.save(new Account(id("DST"), new BigDecimal("0"), "JPY"));
+        Account usdFrom = accountRepository.save(new Account(id("SRC"), new BigDecimal("10000000.00"), "USD"));
+        Account usdTo = accountRepository.save(new Account(id("DST"), new BigDecimal("0.00"), "USD"));
+
+        assertThat(post(new PaymentRequest(id("PAY"), jpyFrom.getId(), jpyTo.getId(), new BigDecimal("5000000"), "JPY"))
+                .getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        JsonNode problem = assertProblem(
+                post(new PaymentRequest(id("PAY"), usdFrom.getId(), usdTo.getId(), new BigDecimal("5000000"), "USD")),
+                HttpStatus.BAD_REQUEST, "invalid-amount", "/payments");
+        assertThat(problem.path("detail").asText()).contains("exceeds the maximum of 1000000.00 USD");
     }
 
     private JsonNode assertProblem(ResponseEntity<String> response, HttpStatus status, String typeSlug,

@@ -10,9 +10,11 @@ import com.example.paymentevent.exception.DuplicatePaymentException;
 import com.example.paymentevent.exception.InsufficientFundsException;
 import com.example.paymentevent.exception.PaymentEventMismatchException;
 import com.example.paymentevent.exception.PaymentValidationException;
+import com.example.paymentevent.exception.ServiceBusyException;
 import com.example.paymentevent.exception.UnknownAccountException;
 import com.example.paymentevent.kafka.PaymentEvent;
 import com.example.paymentevent.kafka.PaymentFailedEvent;
+import com.example.paymentevent.kafka.ScreeningRequestedEvent;
 import com.example.paymentevent.kafka.TransactionEvent;
 import com.example.paymentevent.outbox.OutboxWriter;
 import com.example.paymentevent.repository.AccountRepository;
@@ -23,6 +25,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -41,6 +44,7 @@ public class PaymentService {
 
     private static final String UNIQUE_VIOLATION = "23505";
     private static final String FOREIGN_KEY_VIOLATION = "23503";
+    private static final String LOCK_NOT_AVAILABLE = "55P03";
     private static final int MAX_FAILURE_REASON_LENGTH = 500;
 
     private final PaymentRepository paymentRepository;
@@ -49,17 +53,20 @@ public class PaymentService {
     private final OutboxWriter outboxWriter;
     private final MoneyRules moneyRules;
     private final int maxProcessingAttempts;
+    private final boolean screeningEnabled;
 
     public PaymentService(PaymentRepository paymentRepository, AccountRepository accountRepository,
                           LedgerEntryRepository ledgerEntryRepository, OutboxWriter outboxWriter,
                           MoneyRules moneyRules,
-                          @Value("${payments.processing.max-attempts:10}") int maxProcessingAttempts) {
+                          @Value("${payments.processing.max-attempts:10}") int maxProcessingAttempts,
+                          @Value("${payments.screening.enabled:false}") boolean screeningEnabled) {
         this.paymentRepository = paymentRepository;
         this.accountRepository = accountRepository;
         this.ledgerEntryRepository = ledgerEntryRepository;
         this.outboxWriter = outboxWriter;
         this.moneyRules = moneyRules;
         this.maxProcessingAttempts = maxProcessingAttempts;
+        this.screeningEnabled = screeningEnabled;
     }
 
     /**
@@ -79,15 +86,28 @@ public class PaymentService {
      * foreign keys to accounts, so an unknown account fails the same INSERT. The SQLState
      * tells them apart (23505 unique_violation vs 23503 foreign_key_violation); anything
      * else is rethrown untouched rather than guessed at.
+     *
+     * The same foreign keys make the INSERT take FOR KEY SHARE on both account rows. That only
+     * conflicts with FOR UPDATE (the consumer's own lock is FOR NO KEY UPDATE, see
+     * AccountRepository), so it waits only on an outside FOR UPDATE - a script or manual fix.
+     * If that wait passes lock_timeout (55P03) the account is busy, not the request wrong: it
+     * becomes ServiceBusyException (503 with Retry-After) and the client can send it again.
+     *
+     * With payments.screening.enabled the payment is saved HELD instead, and the outbox gets a
+     * payment.screening.requested event in place of the "payments" one, so no consumer can
+     * process it until screening (or an officer) releases it.
      */
     @Transactional
     public Payment createPayment(String paymentId, String fromAccount, String toAccount,
                                   BigDecimal amount, String currency) {
         moneyRules.validate(amount, currency);
 
-        Payment payment;
+        Payment payment = new Payment(paymentId, fromAccount, toAccount, amount, currency);
+        if (screeningEnabled) {
+            payment.holdForScreening();
+        }
         try {
-            payment = paymentRepository.saveAndFlush(new Payment(paymentId, fromAccount, toAccount, amount, currency));
+            payment = paymentRepository.saveAndFlush(payment);
         } catch (DataIntegrityViolationException ex) {
             String sqlState = sqlStateOf(ex);
             if (UNIQUE_VIOLATION.equals(sqlState)) {
@@ -97,8 +117,19 @@ public class PaymentService {
                 throw unknownAccount(ex, fromAccount, toAccount);
             }
             throw ex;
+        } catch (PessimisticLockingFailureException ex) {
+            if (LOCK_NOT_AVAILABLE.equals(sqlStateOf(ex))) {
+                log.warn("Payment {} not created: an account row was locked past lock_timeout", paymentId);
+                throw new ServiceBusyException("An account in this payment is busy; retry shortly", ex);
+            }
+            throw ex;
         }
-        outboxWriter.enqueuePaymentEvent(PaymentEvent.from(payment));
+        if (screeningEnabled) {
+            outboxWriter.enqueueScreeningRequestedEvent(ScreeningRequestedEvent.from(payment));
+            log.info("Payment {} held for screening", paymentId);
+        } else {
+            outboxWriter.enqueuePaymentEvent(PaymentEvent.from(payment));
+        }
         return payment;
     }
 
@@ -176,7 +207,7 @@ public class PaymentService {
             String reason = "Event does not match stored payment: " + mismatch;
             payment.markFailed(reason);
             paymentRepository.save(payment);
-            outboxWriter.enqueuePaymentFailedEvent(toPaymentFailedEvent(payment));
+            outboxWriter.enqueuePaymentFailedEvent(PaymentFailedEvent.from(payment));
             log.error("Payment {} rejected, no money moved: {}", paymentId, reason);
             throw new PaymentEventMismatchException(reason);
         }
@@ -188,7 +219,7 @@ public class PaymentService {
         } catch (PaymentValidationException ex) {
             payment.markFailed(ex.getMessage());
             paymentRepository.save(payment);
-            outboxWriter.enqueuePaymentFailedEvent(toPaymentFailedEvent(payment));
+            outboxWriter.enqueuePaymentFailedEvent(PaymentFailedEvent.from(payment));
             log.warn("Payment {} failed validation: {}", paymentId, ex.getMessage());
             return PaymentProcessingResult.failed();
         }
@@ -323,11 +354,6 @@ public class PaymentService {
     private TransactionEvent toTransactionEvent(Payment payment) {
         return new TransactionEvent(payment.getPaymentId(), payment.getFromAccount(), payment.getToAccount(),
                 payment.getAmount(), payment.getCurrency(), payment.getProcessedAt());
-    }
-
-    private PaymentFailedEvent toPaymentFailedEvent(Payment payment) {
-        return new PaymentFailedEvent(payment.getPaymentId(), payment.getFromAccount(), payment.getToAccount(),
-                payment.getAmount(), payment.getCurrency(), payment.getFailureReason(), payment.getProcessedAt());
     }
 
     private record AccountPair(Account from, Account to) {

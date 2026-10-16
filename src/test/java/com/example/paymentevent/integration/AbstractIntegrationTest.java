@@ -5,7 +5,14 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.common.serialization.StringDeserializer;
+import org.junit.jupiter.api.BeforeEach;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.web.client.TestRestTemplate;
+import org.springframework.http.HttpRequest;
+import org.springframework.http.client.ClientHttpRequestExecution;
+import org.springframework.http.client.ClientHttpRequestInterceptor;
+import org.springframework.http.client.ClientHttpResponse;
 import org.springframework.context.annotation.Import;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -13,6 +20,7 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.kafka.ConfluentKafkaContainer;
 import org.testcontainers.utility.DockerImageName;
 
+import java.io.IOException;
 import java.time.Duration;
 import java.util.List;
 import java.util.Properties;
@@ -28,8 +36,41 @@ import java.util.UUID;
  * containers across test classes; Testcontainers' Ryuk reaper cleans them up on JVM exit.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@Import(FaultInjectingPaymentProducer.class)
+@Import({FaultInjectingPaymentProducer.class, MigrationSessionRecorder.class, RecordingOverdueHook.class})
 public abstract class AbstractIntegrationTest {
+
+    /**
+     * The API key the test application is started with (payments.api-key, normally from
+     * PAYMENTS_API_KEY). Random per test run, so no key is written down anywhere.
+     */
+    protected static final String TEST_API_KEY = "it-" + UUID.randomUUID();
+
+    @Autowired
+    private TestRestTemplate sharedRestTemplate;
+
+    /**
+     * Every IT talks to the API through the context's TestRestTemplate; it sends the key on
+     * every request unless the request already set the header. ApiKeyAuthIT uses a client of
+     * its own to test requests without it.
+     */
+    @BeforeEach
+    void sendApiKeyOnSharedClient() {
+        List<ClientHttpRequestInterceptor> interceptors = sharedRestTemplate.getRestTemplate().getInterceptors();
+        if (interceptors.stream().noneMatch(ApiKeyHeader.class::isInstance)) {
+            interceptors.add(new ApiKeyHeader());
+        }
+    }
+
+    private static final class ApiKeyHeader implements ClientHttpRequestInterceptor {
+        @Override
+        public ClientHttpResponse intercept(HttpRequest request, byte[] body, ClientHttpRequestExecution execution)
+                throws IOException {
+            if (!request.getHeaders().containsKey("X-API-Key")) {
+                request.getHeaders().set("X-API-Key", TEST_API_KEY);
+            }
+            return execution.execute(request, body);
+        }
+    }
 
     static final PostgreSQLContainer<?> POSTGRES =
             new PostgreSQLContainer<>(DockerImageName.parse("postgres:16-alpine"))
@@ -51,6 +92,7 @@ public abstract class AbstractIntegrationTest {
         registry.add("spring.datasource.username", POSTGRES::getUsername);
         registry.add("spring.datasource.password", POSTGRES::getPassword);
         registry.add("spring.kafka.bootstrap-servers", KAFKA::getBootstrapServers);
+        registry.add("payments.api-key", () -> TEST_API_KEY);
         // Production caps the outbox retry backoff at 30s; tests that inject repeated publish
         // failures would otherwise spend most of their time waiting out the backoff.
         registry.add("outbox.relay.max-backoff-ms", () -> "2000");
@@ -61,6 +103,13 @@ public abstract class AbstractIntegrationTest {
         // Tests call PaymentSweeper.sweep() directly; a background sweep firing mid-test would
         // claim their stale payments first and make the outcome depend on timing.
         registry.add("payments.sweeper.interval-ms", () -> "3600000");
+        // HeldPaymentSweeperIT calls sweep() itself, with payments backdated past the timeout.
+        registry.add("payments.screening.overdue-sweep-interval-ms", () -> "3600000");
+        registry.add("payments.screening.timeout", () -> "PT30M");
+        // Per-currency cap used by ApiProblemDetailsIT; every other currency keeps the default.
+        registry.add("payments.max-amount-by-currency.JPY", () -> "150000000");
+        // Small batches so OutboxRetentionIT exercises several of them with a few hundred rows.
+        registry.add("outbox.retention.batch-size", () -> "50");
     }
 
     /**

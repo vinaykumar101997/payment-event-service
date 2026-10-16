@@ -20,6 +20,7 @@
     <properties>
         <java.version>17</java.version>
         <testcontainers.version>1.20.4</testcontainers.version>
+        <json-schema-validator.version>2.0.8</json-schema-validator.version>
     </properties>
 
     <dependencies>
@@ -27,6 +28,13 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+
+        <!-- Spring Security: X-API-Key authentication (security/ApiKeySecurityConfig).
+             Version managed by Spring Boot. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-security</artifactId>
         </dependency>
 
         <!-- Spring Data JPA (Hibernate) for Account/Payment persistence -->
@@ -55,6 +63,15 @@
         <dependency>
             <groupId>org.flywaydb</groupId>
             <artifactId>flyway-database-postgresql</artifactId>
+        </dependency>
+
+        <!-- JSON Schema (draft 2020-12) validation of the screening events in contracts/.
+             2.0.x is the newest line built on Jackson 2 (3.x moved to Jackson 3, which
+             Spring Boot 3.5 doesn't use). -->
+        <dependency>
+            <groupId>com.networknt</groupId>
+            <artifactId>json-schema-validator</artifactId>
+            <version>${json-schema-validator.version}</version>
         </dependency>
 
         <!-- Postgres JDBC driver, runtime only -->
@@ -116,6 +133,22 @@
     </dependencyManagement>
 
     <build>
+        <!-- contracts/ (the screening JSON Schemas shared with the Python service) is copied
+             onto the classpath under contracts/, so the service validates against the same
+             files the other side reads. -->
+        <resources>
+            <resource>
+                <directory>src/main/resources</directory>
+            </resource>
+            <resource>
+                <directory>contracts</directory>
+                <targetPath>contracts</targetPath>
+                <excludes>
+                    <exclude>examples/**</exclude>
+                    <exclude>README.md</exclude>
+                </excludes>
+            </resource>
+        </resources>
         <plugins>
             <plugin>
                 <groupId>org.springframework.boot</groupId>
