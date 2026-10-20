@@ -23,3 +23,42 @@ jobs:
       # to a fixed Postgres/Kafka container instead of spinning up its own per test class.
       - name: Build and test (unit + Testcontainers integration)
         run: ./mvnw -B verify
+
+  # Builds the Docker image and starts it the way docker-compose.yml does, so a broken
+  # Dockerfile or compose setting fails CI (the tests above run on the checkout, not the image).
+  docker-smoke:
+    needs: build
+    runs-on: ubuntu-24.04
+    env:
+      COMPOSE_PROJECT_NAME: smoke
+    steps:
+      - uses: actions/checkout@v5
+
+      # A fresh random key per run; masked so it never appears in the log.
+      - name: Generate API key
+        run: |
+          key=$(openssl rand -hex 32)
+          echo "::add-mask::$key"
+          echo "PAYMENTS_API_KEY=$key" >> "$GITHUB_ENV"
+
+      # Tagged with the name compose gives the app service's image (<project>-app), so
+      # `up --no-build` below runs exactly this image.
+      - name: Build image
+        run: docker build -t smoke-app .
+
+      - name: Start Postgres and Kafka
+        run: docker compose up -d --wait postgres kafka
+
+      - name: Start app
+        run: docker compose up -d --no-build app
+
+      - name: Smoke test
+        run: bash scripts/smoke-test.sh
+
+      - name: App logs
+        if: failure()
+        run: docker compose logs app
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
