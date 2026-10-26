@@ -138,6 +138,14 @@ curl -H "X-API-Key: $PAYMENTS_API_KEY" localhost:8080/accounts/ACC-1001
 
 To run the app from your IDE instead, start Postgres and Kafka with docker-compose and set `DB_PASSWORD` (the compose file uses `local-dev-only-not-a-secret`) and `PAYMENTS_API_KEY`. The app does not start without `PAYMENTS_API_KEY`.
 
+## Run the demo
+
+```bash
+bash scripts/demo.sh
+```
+
+Needs only Docker and curl. It starts the stack, then shows the seeded balances, a payment being accepted (201), the same request retried (409 with the original payment, no second charge), the same `paymentId` reused with a different amount (422), and the payment read back as PROCESSED with the balances moved once. It removes the stack and its volumes at the end; set `DEMO_KEEP=1` to keep it running or `DEMO_PAUSE` (seconds, default 1) to slow it down.
+
 ## Running tests
 
 ```bash
