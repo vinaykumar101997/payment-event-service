@@ -4,6 +4,10 @@
 
 A payment service that moves money between accounts correctly, even when requests are repeated, payments collide, or part of the system fails.
 
+![Demo: a payment is accepted, a retry is recognised, a reused ID with different details is rejected, and the balances move once](docs/img/payment-demo.gif)
+
+*Run with `bash scripts/demo.sh`: a payment is accepted (201), the same request retried returns 409 with the original payment and no second charge, the same payment ID with a different amount returns 422, and the payment settles with the balances moved once.*
+
 ## What it is
 
 A client sends a payment request, for example "move $25 from account A to account B". The service records it, processes it in the background through Kafka, and keeps a ledger of every debit and credit, the same way a bank keeps its books. Other systems are told about each outcome through events.
@@ -71,6 +75,54 @@ The short version is below. [docs/DESIGN.md](docs/DESIGN.md) has the reasoning b
 *Technical:* RFC 9457 problem details (`application/problem+json`) with a stable `type` per error, each resolving to its entry in [docs/problems.md](docs/problems.md).
 
 ## Architecture
+
+```mermaid
+%%{init: {"flowchart": {"rankSpacing": 28, "nodeSpacing": 30, "wrappingWidth": 440}}}%%
+flowchart TD
+    API[REST API: POST /payments]
+    IDEM{{paymentId already stored?}}
+    DUP[409 same request / 422 changed details]
+    DB[(payments + outbox_events)]
+    RELAY[Outbox relay: SKIP LOCKED]
+    HOLD([Screening verdict or officer release/reject])
+    REJ[REJECTED: payment.failed]
+    SWEEP[Overdue-hold sweeper]
+    TOPIC[(Kafka topic: payments)]
+    CONS[Consumer: claim, lock accounts in sorted order]
+    OK{{funds, currency, accounts valid?}}
+    LEDGER[(accounts + ledger_entries)]
+    FAIL[FAILED or POISONED: payment.failed, payments.DLT]
+    DONE[PROCESSED: transactions event]
+
+    API -->|validated request| IDEM
+    IDEM -->|yes: compare request hash| DUP
+    IDEM -->|no: one transaction| DB
+    DB -->|screening off: RECEIVED| RELAY
+    DB -->|screening on: HELD| HOLD
+    RELAY -->|payments event| TOPIC
+    HOLD -->|CLEAR or release| TOPIC
+    HOLD -->|REJECT or reject| REJ
+    HOLD -->|FLAG, ERROR: stays HELD| SWEEP
+    TOPIC -->|payment event| CONS
+    CONS -->|accounts locked| OK
+    CONS -->|mismatch or retries spent| FAIL
+    OK -->|yes: debit + credit| LEDGER
+    OK -->|no| FAIL
+    LEDGER -->|same transaction| DONE
+
+    classDef svc fill:#dbeafe,stroke:#2563eb,color:#111111
+    classDef dec fill:#fef3c7,stroke:#d97706,color:#111111
+    classDef ext fill:#dcfce7,stroke:#16a34a,color:#111111
+    classDef store fill:#ede9fe,stroke:#7c3aed,color:#111111
+    classDef done fill:#e5e7eb,stroke:#6b7280,color:#111111
+    class API,RELAY,SWEEP,CONS svc
+    class IDEM,OK dec
+    class HOLD ext
+    class DB,TOPIC,LEDGER store
+    class DUP,REJ,FAIL,DONE done
+```
+
+*The diagram is simplified. A released payment is written back to the outbox and published by the relay like any other; a screening request also leaves through the relay to the external screening service; a payment with no verdict stays held and is flagged overdue by the sweeper; and FAILED or POISONED covers validation failures, event mismatches and exhausted retries, the last two also going to the dead-letter topic.*
 
 ```
 Client
