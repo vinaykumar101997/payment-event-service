@@ -44,7 +44,7 @@ What the integration tests prove, against real Postgres and Kafka:
 | A message whose amount disagrees with the saved payment | No money moves, the payment is failed for investigation |
 | Ledger reconciliation after concurrent workloads | Every payment nets to zero, every balance matches its entries |
 
-81 unit tests and 78 integration tests in total (see Verification).
+Unit and integration tests cover each scenario above (see [Verification](#verification)).
 
 ## Design decisions
 
@@ -124,42 +124,6 @@ flowchart TD
 
 *The diagram is simplified. A released payment is written back to the outbox and published by the relay like any other; a screening request also leaves through the relay to the external screening service; a payment with no verdict stays held and is flagged overdue by the sweeper; and FAILED or POISONED covers validation failures, event mismatches and exhausted retries, the last two also going to the dead-letter topic.*
 
-```
-Client
-  |  POST /payments
-  v
-PaymentController --validates(structural)--> PaymentService.createPayment()
-  |                                              (RECEIVED row + "payments" outbox row,
-  |  GET /payments/{id}, GET /accounts/{id}        one transaction)
-  |  (read from Postgres)
-  v
-(response)
-
-OutboxRelay (every 500ms): claim pending outbox rows (FOR UPDATE SKIP LOCKED)
-  -> PaymentProducer -> "payments" / "transactions" topic -> mark published
-  (failed publish: row backed off and retried, never dropped)
-
-"payments" topic (key = paymentId, 3 partitions)
-  |
-  v
-PaymentConsumer -> PaymentService.process()
-  |-- claim (RECEIVED -> PROCESSING, atomic UPDATE)
-  |-- compare event to the stored Payment row (mismatch -> mark FAILED, rethrow, no money moved)
-  |-- lock both accounts (PESSIMISTIC_WRITE, sorted order)
-  |-- validate existence/currency/balance (under the lock, from the stored row)
-  |-- debit/credit + ledger entries +       --or--   business rule failed: mark FAILED +
-  |   "transactions" outbox row, PROCESSED             "payment.failed" outbox row (no DLT)
-  v
-(OutboxRelay publishes to "transactions" / "payment.failed")
-
-Non-business failure (DB error, ...): attempt counted, Kafka retries with backoff;
-  after payments.processing.max-attempts -> POISONED (terminal) -> "payments.DLT".
-Event/stored-row mismatch: mark FAILED + "payment.failed", and -> "payments.DLT".
-
-PaymentSweeper (every 30s): re-enqueues (via the outbox) anything still RECEIVED after 60s
-(safety net for payments whose processing kept failing with retryable errors)
-```
-
 ## Tech stack
 
 | Area | Tools |
@@ -174,7 +138,7 @@ PaymentSweeper (every 30s): re-enqueues (via the outbox) anything still RECEIVED
 
 ```bash
 export PAYMENTS_API_KEY=$(openssl rand -hex 32)   # any value; clients must send it
-docker-compose up --build
+docker compose up --build
 ```
 
 This starts Postgres, a single-node Kafka broker and the app on port 8080. Accounts `ACC-1001` and `ACC-1002` are created for you. Compose refuses to start the app if `PAYMENTS_API_KEY` is not set; no key is stored in the repository.
@@ -188,7 +152,7 @@ curl -H "X-API-Key: $PAYMENTS_API_KEY" localhost:8080/payments/p-1
 curl -H "X-API-Key: $PAYMENTS_API_KEY" localhost:8080/accounts/ACC-1001
 ```
 
-To run the app from your IDE instead, start Postgres and Kafka with docker-compose and set `DB_PASSWORD` (the compose file uses `local-dev-only-not-a-secret`) and `PAYMENTS_API_KEY`. The app does not start without `PAYMENTS_API_KEY`.
+To run the app from your IDE instead, start Postgres and Kafka with `docker compose` and set `DB_PASSWORD` (the compose file uses `local-dev-only-not-a-secret`) and `PAYMENTS_API_KEY`. The app does not start without `PAYMENTS_API_KEY`.
 
 ## Run the demo
 
@@ -209,16 +173,7 @@ The integration tests start real Postgres and Kafka containers once per test run
 
 ## Verification
 
-Last full run: 2026-10-15, `./mvnw -B clean verify`, Windows 11, JDK 17.0.12, Docker 29.8.1:
-
-```
-[INFO] Tests run: 81, Failures: 0, Errors: 0, Skipped: 0   (unit, surefire)
-[INFO] Tests run: 78, Failures: 0, Errors: 0, Skipped: 0   (integration, failsafe)
-[INFO] BUILD SUCCESS
-[INFO] Total time:  03:21 min
-```
-
-The badge above shows the latest GitHub Actions run of the same command.
+The build runs 81 unit tests and 78 integration tests, all passing. CI runs `./mvnw -B verify` on a fresh checkout on every push to `main` and every pull request (badge above).
 
 ## Screening hold
 
@@ -285,60 +240,7 @@ Settings (environment variable form in brackets):
 - `payments.screening.timeout` (`PAYMENTS_SCREENING_TIMEOUT`): ISO-8601 duration after which a HELD payment is marked overdue. Default `PT1H`.
 - `payments.screening.overdue-sweep-interval-ms`: how often the overdue check runs. Default 60000.
 
-Without the screening service you can play its part with Kafka's console producer. These steps were run end to end on 2026-10-15 (Windows 11, Git Bash, Docker Compose v5.5.1); the transcript is in [docs/DESIGN.md](docs/DESIGN.md#demo-walkthrough). Run them all in one terminal: the compose file requires `PAYMENTS_API_KEY` for every `docker-compose` command, not only `up`.
-
-```bash
-export PAYMENTS_API_KEY=$(openssl rand -hex 32) PAYMENTS_SCREENING_ENABLED=true
-docker-compose up --build -d           # wait for "Started PaymentEventServiceApplication" in: docker-compose logs app
-# Git Bash on Windows only: stop it rewriting /opt/... paths in the docker-compose exec commands below
-export MSYS_NO_PATHCONV=1
-
-# 1. A payment that screening clears
-curl -s -X POST localhost:8080/payments -H "X-API-Key: $PAYMENTS_API_KEY" -H "Content-Type: application/json" \
-  -d '{"paymentId": "demo-clear", "fromAccount": "ACC-1001", "toAccount": "ACC-1002", "amount": 10.00, "currency": "USD"}'
-# -> "status":"HELD"; the screening request is on payment.screening.requested:
-docker-compose exec -T kafka /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 \
-  --topic payment.screening.requested --from-beginning --property print.key=true --property key.separator="|" --max-messages 1 --timeout-ms 10000
-echo 'demo-clear|{"schemaVersion":1,"eventId":"4f3c2b1a-0e9d-4c8b-9a7f-6e5d4c3b2a10","paymentId":"demo-clear","verdict":"CLEAR","reasons":[],"riskScore":0.04,"decidedAt":"2026-10-15T12:00:00Z","screeningRunId":"manual-1"}' \
-  | docker-compose exec -T kafka /opt/kafka/bin/kafka-console-producer.sh --bootstrap-server localhost:9092 \
-      --topic payment.screening.completed --property parse.key=true --property key.separator="|"
-sleep 3                                # processing is asynchronous: RECEIVED first, PROCESSED once the consumer has run
-curl -s -H "X-API-Key: $PAYMENTS_API_KEY" localhost:8080/payments/demo-clear          # -> "status":"PROCESSED"
-
-# 2. Two payments that screening flags, then an officer releases one and rejects the other
-curl -s -X POST localhost:8080/payments -H "X-API-Key: $PAYMENTS_API_KEY" -H "Content-Type: application/json" \
-  -d '{"paymentId": "demo-release", "fromAccount": "ACC-1001", "toAccount": "ACC-1002", "amount": 20.00, "currency": "USD"}'
-curl -s -X POST localhost:8080/payments -H "X-API-Key: $PAYMENTS_API_KEY" -H "Content-Type: application/json" \
-  -d '{"paymentId": "demo-reject", "fromAccount": "ACC-1001", "toAccount": "ACC-1002", "amount": 30.00, "currency": "USD"}'
-printf '%s\n' \
-  'demo-release|{"schemaVersion":1,"eventId":"5a4d3c2b-1f0e-4d9c-8b7a-6f5e4d3c2b11","paymentId":"demo-release","verdict":"FLAG","reasons":["name match"],"riskScore":0.71,"decidedAt":"2026-10-15T12:01:00Z","screeningRunId":"manual-2"}' \
-  'demo-reject|{"schemaVersion":1,"eventId":"6b5e4d3c-2a1f-4e0d-9c8b-7a6f5e4d3c12","paymentId":"demo-reject","verdict":"FLAG","reasons":["high-risk corridor"],"riskScore":0.88,"decidedAt":"2026-10-15T12:01:00Z","screeningRunId":"manual-2"}' \
-  | docker-compose exec -T kafka /opt/kafka/bin/kafka-console-producer.sh --bootstrap-server localhost:9092 \
-      --topic payment.screening.completed --property parse.key=true --property key.separator="|"
-sleep 3
-curl -s -H "X-API-Key: $PAYMENTS_API_KEY" "localhost:8080/payments?status=HELD"       # both, with reasons and riskScore
-curl -s -X POST localhost:8080/payments/demo-release/release -H "X-API-Key: $PAYMENTS_API_KEY" \
-  -H "Content-Type: application/json" -d '{"officer": "alice", "note": "checked, not the listed person"}'
-curl -s -X POST localhost:8080/payments/demo-reject/reject -H "X-API-Key: $PAYMENTS_API_KEY" \
-  -H "Content-Type: application/json" -d '{"officer": "carol", "note": "customer confirmed fraud"}'
-sleep 3
-curl -s -H "X-API-Key: $PAYMENTS_API_KEY" localhost:8080/payments/demo-release        # -> "status":"PROCESSED"
-curl -s -H "X-API-Key: $PAYMENTS_API_KEY" localhost:8080/payments/demo-reject         # -> "status":"REJECTED"
-
-docker-compose down -v                 # stop and delete the demo data
-```
-
-The console producer reads verdicts from standard input, one `key|json` per line; `-T` lets `docker-compose exec` take the piped input. The consumer step prints the one screening request on a fresh stack (`--max-messages 1`); on a stack with older payments, drop `--max-messages 1` and it stops after 10 seconds with a `TimeoutException` message, which is expected. Status changes after a verdict or a release are asynchronous (outbox relay, then the payments consumer), hence the `sleep 3` lines.
-
-### Not done yet
-
-- **No screening service here.** This repository only publishes requests, consumes verdicts and holds payments; the Python screening service is separate and not built.
-- **Overdue is a log line only.** `HeldPaymentOverdueHook` has no implementation (metrics are out of scope), so the WARN line is the only signal.
-- **Dead-lettered verdicts are not replayed.** A verdict on `payment.screening.completed.DLT` stays there; its payment stays HELD until another verdict or an officer decides.
-- **A lost screening request is not re-sent.** If its outbox row goes dead, the payment stays HELD and only shows up as overdue.
-- **Officers are not individually authenticated.** Anyone with the API key can release or reject, and `officer` is free text.
-- **Switching screening on doesn't screen older payments.** Only payments created while it is on are held; switching it off doesn't release HELD ones (verdicts are then not consumed, officers can still decide).
-- **`riskScore` is stored, never used.**
+To try it without the screening service, play its part with Kafka's console producer: the commands and their recorded output are in [docs/DESIGN.md](docs/DESIGN.md#demo-walkthrough).
 
 ## API
 
@@ -351,11 +253,11 @@ The console producer reads verdicts from standard input, one `key|json` per line
 | POST | `/payments/{id}/release` | Officer releases a HELD payment. Body `{"officer": "...", "note": "..."}`, both required |
 | POST | `/payments/{id}/reject` | Officer rejects a HELD payment. Same body |
 
-Every request needs the header `X-API-Key` with the value of `PAYMENTS_API_KEY` (required, no default). The comparison is constant-time (SHA-256 digests compared with `MessageDigest.isEqual`). Only `/actuator/health` is left open; this build has no actuator, so that path returns 404, not 401.
+Every request needs the header `X-API-Key` with the value of `PAYMENTS_API_KEY` (required, no default). The comparison is constant-time (SHA-256 digests compared with `MessageDigest.isEqual`). The service has no actuator endpoints.
 
 Errors are `application/problem+json`: 401 `unauthorized` (missing or wrong key; same answer for both); 400 `invalid-query` (list parameters), `validation-failed`, `malformed-request`, `invalid-request`, `invalid-amount`; 404 `not-found`; 409 `duplicate-payment` (includes the existing payment), `payment-not-held` (officer decision on a payment that isn't HELD; includes it); 422 `unknown-account`, `payment-id-reused`; 503 `service-busy` (with `Retry-After`).
 
-Each problem `type` is `payments.problem-base-uri` + the slug. By default that resolves to the matching section of [docs/problems.md](docs/problems.md) (for example `https://github.com/vinaykumar101997/payment-event-service/blob/main/docs/problems.md#invalid-amount`), which gives the status, when it occurs, an example body and what the client should do. Set `PAYMENTS_PROBLEM_BASE_URI` to publish them elsewhere. **Change:** `type` values used to be `https://example.com/problems/<slug>`; clients that matched on those must switch to the new URIs. There are no known clients.
+Each problem `type` is `payments.problem-base-uri` + the slug. By default that resolves to the matching section of [docs/problems.md](docs/problems.md) (for example `https://github.com/vinaykumar101997/payment-event-service/blob/main/docs/problems.md#invalid-amount`), which gives the status, when it occurs, an example body and what the client should do. Set `PAYMENTS_PROBLEM_BASE_URI` to publish them elsewhere.
 
 ## Known limitations
 
@@ -367,8 +269,14 @@ Each problem `type` is `payments.problem-base-uri` + the slug. By default that r
 - **Migrations have no statement timeout.** Flyway runs on its own connection without `statement_timeout` (it keeps `lock_timeout`), so a runaway migration is stopped only by a lock timeout or an operator.
 - **Problem type URIs point at `main` on GitHub by default.** A client reads the latest [docs/problems.md](docs/problems.md), not necessarily the version deployed. Set `PAYMENTS_PROBLEM_BASE_URI` per environment to change it.
 - **One API key for every client.** All clients share `PAYMENTS_API_KEY`; there are no per-client keys or roles. Changing the key needs a restart.
-- **Officer decisions are not individually authenticated.** The `officer` name in a release or reject request is self-asserted: the service stores whatever the caller sends, and the only check is the shared API key. Anyone holding the key can release or reject a payment under any name, so `officer_decisions` records who *said* they decided, not who did. A real system would authenticate each officer through an identity provider with OpenID Connect (single sign-on, ideally with multi-factor), send a short-lived access token instead of a shared key, take the officer's identity from the token's `sub` claim rather than the request body, allow release and reject only to a compliance-officer role, and enforce four-eyes approval (the person who releases a high-risk payment is not the one who created or flagged it). Each decision record would then name a verified person.
+- **Officer decisions are not individually authenticated.** The `officer` name is self-asserted: anyone holding the shared API key can release or reject a payment under any name, and the fix (OpenID Connect identity from the token's `sub` claim, an officer role, four-eyes approval) is described under [Production hardening](docs/DESIGN.md#production-hardening).
 - **Event order per payment is not guaranteed once a payment can have two events on the same topic.** Today each payment has at most one event per topic, so it doesn't matter yet. Future reversals would need ordered publishing per key.
+- **No screening service here.** This repository only publishes requests, consumes verdicts and holds payments; the Python screening service is separate and not built.
+- **Overdue is a log line only.** `HeldPaymentOverdueHook` has no implementation (metrics are out of scope), so the WARN line is the only signal.
+- **Dead-lettered verdicts are not replayed.** A verdict on `payment.screening.completed.DLT` stays there; its payment stays HELD until another verdict or an officer decides.
+- **A lost screening request is not re-sent.** If its outbox row goes dead, the payment stays HELD and only shows up as overdue.
+- **Switching screening on doesn't screen older payments.** Only payments created while it is on are held; switching it off doesn't release HELD ones (verdicts are then not consumed, officers can still decide).
+- **`riskScore` is stored, never used.**
 
 ## Roadmap
 
