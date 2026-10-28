@@ -103,8 +103,13 @@ class ProjectDocsTest {
         String readme = read("README.md");
 
         assertThat(readme).contains("actions/workflows/ci.yml/badge.svg");
-        assertThat(readme).contains("## Verification");
-        assertThat(readme).containsPattern("Tests run: \\d+, Failures: 0, Errors: 0");
+        int start = readme.indexOf("## Verification");
+        assertThat(start).as("Verification section").isNotNegative();
+        int end = readme.indexOf("\n## ", start + 1);
+        String verification = readme.substring(start, end < 0 ? readme.length() : end);
+
+        assertThat(verification).contains("CI runs `./mvnw -B verify`");
+        assertThat(verification).containsPattern("\\d+ unit tests and \\d+ integration tests");
     }
 
     /**
@@ -147,9 +152,9 @@ class ProjectDocsTest {
     }
 
     /**
-     * The README's screening section covers the topics, the switch, how to run it and what
-     * isn't done; every transition is implemented; the roadmap no longer lists the screening
-     * hold as future work.
+     * The README's screening section covers the transitions, the topics, the switch and how to
+     * run it; Known limitations lists what screening doesn't do yet; the roadmap no longer lists
+     * the screening hold as future work.
      */
     @Test
     void readmeDocumentsTheScreeningHold() throws IOException {
@@ -162,9 +167,22 @@ class ProjectDocsTest {
         assertThat(screening).contains(
                 "### Topics", "`payment.screening.requested`", "`payment.screening.completed`",
                 "`payment.screening.completed.DLT`",
-                "### Running with screening on", "PAYMENTS_SCREENING_ENABLED", "payments.screening.timeout",
-                "### Not done yet");
+                "### Payment status transitions",
+                "### Running with screening on", "PAYMENTS_SCREENING_ENABLED", "payments.screening.timeout");
         assertThat(screening).doesNotContain("not yet (S");
+
+        int limitationsStart = readme.indexOf("## Known limitations");
+        assertThat(limitationsStart).as("Known limitations section").isNotNegative();
+        int limitationsEnd = readme.indexOf("\n## ", limitationsStart + 1);
+        String limitations = readme.substring(limitationsStart,
+                limitationsEnd < 0 ? readme.length() : limitationsEnd);
+        assertThat(limitations).contains(
+                "No screening service here",
+                "Overdue is a log line only",
+                "Dead-lettered verdicts are not replayed",
+                "A lost screening request is not re-sent",
+                "Switching screening on doesn't screen older payments",
+                "`riskScore` is stored, never used");
 
         int roadmap = readme.indexOf("## Roadmap");
         assertThat(roadmap).isNotNegative();
@@ -172,8 +190,9 @@ class ProjectDocsTest {
     }
 
     /**
-     * The compose walkthrough was run by hand; the design doc records it, and the README no
-     * longer says it wasn't run and covers CLEAR, FLAG, release and reject.
+     * The compose walkthrough was run by hand; the design doc holds its commands (CLEAR, FLAG,
+     * release and reject) and the recorded transcript, and the README links to it and no longer
+     * says it wasn't run.
      */
     @Test
     void screeningWalkthroughWasRunAndRecorded() throws IOException {
@@ -181,14 +200,16 @@ class ProjectDocsTest {
         int start = design.indexOf("## Demo walkthrough");
         assertThat(start).as("Demo walkthrough section in docs/DESIGN.md").isNotNegative();
         int end = design.indexOf("\n## ", start + 1);
-        assertThat(design.substring(start, end < 0 ? design.length() : end))
-                .contains("docker-compose", "kafka-console-producer", "/release", "/reject");
+        String walkthrough = design.substring(start, end < 0 ? design.length() : end);
+        assertThat(walkthrough).contains("docker-compose", "kafka-console-producer",
+                "\"verdict\":\"CLEAR\"", "\"verdict\":\"FLAG\"", "/release", "/reject");
+        assertThat(walkthrough).as("recorded transcript").contains(
+                "$ docker-compose up --build -d", "Processed a total of 1 messages",
+                "\"status\":\"PROCESSED\"", "\"status\":\"REJECTED\"");
 
         String readme = read("README.md");
         assertThat(readme).doesNotContain("were not run as part of the verification");
-        int run = readme.indexOf("### Running with screening on");
-        String walkthrough = readme.substring(run, readme.indexOf("\n### ", run + 1));
-        assertThat(walkthrough).contains("\"verdict\":\"CLEAR\"", "\"verdict\":\"FLAG\"", "/release", "/reject");
+        assertThat(readme).contains("](docs/DESIGN.md#demo-walkthrough)");
     }
 
     /**

@@ -6,6 +6,9 @@ Every error from the API is an [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457
 `https://github.com/vinaykumar101997/payment-event-service/blob/main/docs/problems.md#`,
 each `type` links to the section of this page with the same name.
 
+`type` values used to be `https://example.com/problems/<slug>`; clients that matched on
+those must switch to the new URIs.
+
 Branch on `type`, not on `title` or `detail`: `title` names the kind of problem and `detail`
 explains this occurrence in words that may change. `instance` is the request path.
 
