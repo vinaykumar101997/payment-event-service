@@ -6,6 +6,7 @@ import com.example.paymentevent.kafka.PaymentFailedEvent;
 import com.example.paymentevent.kafka.PaymentProducer;
 import com.example.paymentevent.kafka.ScreeningRequestedEvent;
 import com.example.paymentevent.kafka.TransactionEvent;
+import com.example.paymentevent.metrics.PaymentMetrics;
 import com.example.paymentevent.repository.OutboxEventRepository;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -39,7 +40,7 @@ import java.util.List;
  * failures the row is marked dead (dead_at, logged at ERROR, never claimed again) instead of
  * being retried forever. After a few consecutive failures the batch stops early - the broker
  * is probably down, and every further send would just hold the transaction open until its
- * own timeout.
+ * own timeout. Every failed publish is counted (payments.outbox.publish.failures, by topic).
  */
 @Component
 public class OutboxRelay {
@@ -54,17 +55,19 @@ public class OutboxRelay {
     private final PaymentProducer paymentProducer;
     private final ObjectMapper objectMapper;
     private final TransactionTemplate transactionTemplate;
+    private final PaymentMetrics metrics;
     private final Duration maxBackoff;
     private final int maxAttempts;
 
     public OutboxRelay(OutboxEventRepository outboxEventRepository, PaymentProducer paymentProducer,
-                       ObjectMapper objectMapper, TransactionTemplate transactionTemplate,
+                       ObjectMapper objectMapper, TransactionTemplate transactionTemplate, PaymentMetrics metrics,
                        @Value("${outbox.relay.max-backoff-ms:30000}") long maxBackoffMs,
                        @Value("${outbox.relay.max-attempts:50}") int maxAttempts) {
         this.outboxEventRepository = outboxEventRepository;
         this.paymentProducer = paymentProducer;
         this.objectMapper = objectMapper;
         this.transactionTemplate = transactionTemplate;
+        this.metrics = metrics;
         this.maxBackoff = Duration.ofMillis(maxBackoffMs);
         this.maxAttempts = maxAttempts;
     }
@@ -96,6 +99,7 @@ public class OutboxRelay {
                 published++;
                 consecutiveFailures = 0;
             } catch (RuntimeException ex) {
+                metrics.outboxPublishFailed(event.getTopic());
                 Duration backoff = backoffAfter(event.getAttempts() + 1);
                 if (event.recordFailure(ex.getMessage(), backoff, maxAttempts)) {
                     log.error("Outbox event {} (topic={}, key={}) is DEAD after {} failed publish attempts; "

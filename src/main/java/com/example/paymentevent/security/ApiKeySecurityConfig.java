@@ -15,9 +15,10 @@ import org.springframework.web.servlet.HandlerExceptionResolver;
 
 /**
  * API key authentication for the whole API. Everything needs a valid X-API-Key except
- * /actuator/health (left open for liveness checks) and the servlet ERROR dispatch (so an
- * error on an authenticated request can still be rendered). Deny by default: a new endpoint
- * is protected without anyone remembering to list it.
+ * /actuator/health and /actuator/info (left open for liveness checks; health shows no
+ * component details) and the servlet ERROR dispatch (so an error on an authenticated request
+ * can still be rendered). Deny by default: a new endpoint is protected without anyone
+ * remembering to list it, /actuator/prometheus included.
  *
  * Stateless: no session, no cookies, so CSRF protection (which defends cookie-based
  * sessions) is off, as are form login, HTTP Basic and logout.
@@ -42,7 +43,7 @@ public class ApiKeySecurityConfig {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
-                        .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
+                        .requestMatchers("/actuator/health", "/actuator/health/**", "/actuator/info").permitAll()
                         .anyRequest().authenticated())
                 .addFilterBefore(new ApiKeyAuthenticationFilter(apiKey), AnonymousAuthenticationFilter.class)
                 .exceptionHandling(exceptions -> exceptions.authenticationEntryPoint(problemEntryPoint));

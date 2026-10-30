@@ -13,8 +13,8 @@ SMOKE_TIMEOUT="${SMOKE_TIMEOUT:-90}"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
-# The build has no actuator, so /actuator/health is 404. A 200 for a seeded account (V2) with
-# the key shows the app is up, migrations ran and authentication works.
+# /actuator/health would only show the app is up. A 200 for a seeded account (V2) with the key
+# also shows migrations ran and authentication works.
 echo "Waiting up to ${SMOKE_TIMEOUT}s for ${BASE_URL} ..."
 deadline=$((SECONDS + SMOKE_TIMEOUT))
 until [ "$(curl -s -o /dev/null -w '%{http_code}' -H "X-API-Key: $PAYMENTS_API_KEY" "$BASE_URL/accounts/ACC-1001")" = 200 ]; do

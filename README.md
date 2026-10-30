@@ -133,6 +133,7 @@ flowchart TD
 | Messaging | Apache Kafka (KRaft mode), Spring Kafka, dead-letter topics |
 | Testing | JUnit 5, Mockito, AssertJ, Awaitility, Testcontainers |
 | Build and delivery | Maven wrapper, Docker, Docker Compose, GitHub Actions |
+| Observability | Spring Boot Actuator, Micrometer (Prometheus format) |
 
 ## Running locally
 
@@ -173,7 +174,7 @@ The integration tests start real Postgres and Kafka containers once per test run
 
 ## Verification
 
-The build runs 81 unit tests and 78 integration tests, all passing. CI runs `./mvnw -B verify` on a fresh checkout on every push to `main` and every pull request (badge above).
+The build runs 87 unit tests and 83 integration tests, all passing. CI runs `./mvnw -B verify` on a fresh checkout on every push to `main` and every pull request (badge above).
 
 ## Screening hold
 
@@ -253,11 +254,26 @@ To try it without the screening service, play its part with Kafka's console prod
 | POST | `/payments/{id}/release` | Officer releases a HELD payment. Body `{"officer": "...", "note": "..."}`, both required |
 | POST | `/payments/{id}/reject` | Officer rejects a HELD payment. Same body |
 
-Every request needs the header `X-API-Key` with the value of `PAYMENTS_API_KEY` (required, no default). The comparison is constant-time (SHA-256 digests compared with `MessageDigest.isEqual`). The service has no actuator endpoints.
+Every request needs the header `X-API-Key` with the value of `PAYMENTS_API_KEY` (required, no default). The comparison is constant-time (SHA-256 digests compared with `MessageDigest.isEqual`). `/actuator/health` and `/actuator/info` answer without it; `/actuator/prometheus` needs it (see [Observability](#observability)).
 
 Errors are `application/problem+json`: 401 `unauthorized` (missing or wrong key; same answer for both); 400 `invalid-query` (list parameters), `validation-failed`, `malformed-request`, `invalid-request`, `invalid-amount`; 404 `not-found`; 409 `duplicate-payment` (includes the existing payment), `payment-not-held` (officer decision on a payment that isn't HELD; includes it); 422 `unknown-account`, `payment-id-reused`; 503 `service-busy` (with `Retry-After`).
 
 Each problem `type` is `payments.problem-base-uri` + the slug. By default that resolves to the matching section of [docs/problems.md](docs/problems.md) (for example `https://github.com/vinaykumar101997/payment-event-service/blob/main/docs/problems.md#invalid-amount`), which gives the status, when it occurs, an example body and what the client should do. Set `PAYMENTS_PROBLEM_BASE_URI` to publish them elsewhere.
+
+## Observability
+
+`GET /actuator/prometheus` serves the metrics in Prometheus text format. It needs the `X-API-Key` header like every other endpoint and answers 401 without it. `/actuator/health` (UP or DOWN, no component details) and `/actuator/info` are open, for liveness checks.
+
+| Metric | Type | Meaning |
+|---|---|---|
+| `payments_final_status_total{status}` | counter | Payments that reached `PROCESSED`, `FAILED`, `POISONED` or `REJECTED`, counted when the transaction commits |
+| `payments_screening_held` | gauge | Payments currently `HELD` for screening |
+| `payments_screening_overdue_total` | counter | Holds the sweeper marked overdue (once per payment) |
+| `payments_outbox_unpublished` | gauge | Outbox rows not yet published to Kafka; dead rows are not included |
+| `payments_outbox_oldest_unpublished_age_seconds` | gauge | Age of the oldest of those rows, 0 when there are none |
+| `payments_outbox_publish_failures_total{topic}` | counter | Failed Kafka publishes from the outbox relay, by topic |
+
+The gauges are read from the database on a fixed delay (`payments.metrics.refresh-interval-ms`, default 15 seconds), never during a scrape; both queries use existing indexes. Tags are a status or a topic only, never a payment id, account id or amount. Spring Boot's own JVM, HTTP, Hikari and Kafka client metrics are on the same endpoint.
 
 ## Known limitations
 
@@ -272,7 +288,7 @@ Each problem `type` is `payments.problem-base-uri` + the slug. By default that r
 - **Officer decisions are not individually authenticated.** The `officer` name is self-asserted: anyone holding the shared API key can release or reject a payment under any name, and the fix (OpenID Connect identity from the token's `sub` claim, an officer role, four-eyes approval) is described under [Production hardening](docs/DESIGN.md#production-hardening).
 - **Event order per payment is not guaranteed once a payment can have two events on the same topic.** Today each payment has at most one event per topic, so it doesn't matter yet. Future reversals would need ordered publishing per key.
 - **No screening service here.** This repository only publishes requests, consumes verdicts and holds payments; the Python screening service is separate and not built.
-- **Overdue is a log line only.** `HeldPaymentOverdueHook` has no implementation (metrics are out of scope), so the WARN line is the only signal.
+- **Overdue raises no alert.** An overdue hold is logged at WARN and counted (`payments_screening_overdue_total`), but nothing here pages anyone; alerting is left to whatever scrapes the metrics.
 - **Dead-lettered verdicts are not replayed.** A verdict on `payment.screening.completed.DLT` stays there; its payment stays HELD until another verdict or an officer decides.
 - **A lost screening request is not re-sent.** If its outbox row goes dead, the payment stays HELD and only shows up as overdue.
 - **Switching screening on doesn't screen older payments.** Only payments created while it is on are held; switching it off doesn't release HELD ones (verdicts are then not consumed, officers can still decide).

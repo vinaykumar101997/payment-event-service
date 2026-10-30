@@ -99,7 +99,7 @@ build without them fails immediately instead of at the first verdict. A declined
 (insufficient funds, unknown account) is a normal `payment.failed` outcome; only real faults
 reach a dead-letter topic.
 
-**API key authentication.** Every path except `/actuator/health` needs `X-API-Key` equal to
+**API key authentication.** Every path except `/actuator/health` and `/actuator/info` needs `X-API-Key` equal to
 `PAYMENTS_API_KEY`, which has no default, so a deployment can't start with a guessable key. The
 presented and configured keys are hashed with SHA-256 and compared with `MessageDigest.isEqual`,
 so response time doesn't depend on how much of a guess is right or on its length. The chain is

@@ -5,8 +5,10 @@ import com.example.paymentevent.domain.PaymentStatus;
 import com.example.paymentevent.exception.UnknownScreenedPaymentException;
 import com.example.paymentevent.kafka.PaymentEvent;
 import com.example.paymentevent.kafka.PaymentFailedEvent;
+import com.example.paymentevent.metrics.PaymentMetrics;
 import com.example.paymentevent.outbox.OutboxWriter;
 import com.example.paymentevent.repository.PaymentRepository;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -47,7 +49,8 @@ class ScreeningServiceTest {
 
     @BeforeEach
     void setUp() {
-        screeningService = new ScreeningService(paymentRepository, verdictRepository, outboxWriter);
+        screeningService = new ScreeningService(paymentRepository, verdictRepository, outboxWriter,
+                new PaymentMetrics(new SimpleMeterRegistry()));
     }
 
     @Test

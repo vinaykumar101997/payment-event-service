@@ -12,10 +12,12 @@ import com.example.paymentevent.kafka.PaymentEvent;
 import com.example.paymentevent.kafka.PaymentFailedEvent;
 import com.example.paymentevent.kafka.ScreeningRequestedEvent;
 import com.example.paymentevent.kafka.TransactionEvent;
+import com.example.paymentevent.metrics.PaymentMetrics;
 import com.example.paymentevent.outbox.OutboxWriter;
 import com.example.paymentevent.repository.AccountRepository;
 import com.example.paymentevent.repository.LedgerEntryRepository;
 import com.example.paymentevent.repository.PaymentRepository;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.hibernate.exception.ConstraintViolationException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -58,12 +60,14 @@ class PaymentServiceTest {
     @Mock
     private OutboxWriter outboxWriter;
 
+    private final PaymentMetrics metrics = new PaymentMetrics(new SimpleMeterRegistry());
+
     private PaymentService paymentService;
 
     @BeforeEach
     void setUp() {
         paymentService = new PaymentService(paymentRepository, accountRepository, ledgerEntryRepository,
-                outboxWriter, new MoneyRules(new BigDecimal("1000000.00")), 10, false);
+                outboxWriter, new MoneyRules(new BigDecimal("1000000.00")), metrics, 10, false);
     }
 
     @Test
@@ -297,7 +301,7 @@ class PaymentServiceTest {
     @Test
     void createPaymentWithScreeningEnabledHoldsItAndRequestsScreeningInsteadOfProcessing() {
         PaymentService screening = new PaymentService(paymentRepository, accountRepository, ledgerEntryRepository,
-                outboxWriter, new MoneyRules(new BigDecimal("1000000.00")), 10, true);
+                outboxWriter, new MoneyRules(new BigDecimal("1000000.00")), metrics, 10, true);
         when(paymentRepository.saveAndFlush(any(Payment.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         Payment payment = screening.createPayment("p1", "acc-a", "acc-b", new BigDecimal("50.00"), "USD");

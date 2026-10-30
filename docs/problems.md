@@ -257,7 +257,7 @@ In the examples, `{base}` stands for the configured base URI.
 ## unauthorized
 
 - **HTTP status:** 401 Unauthorized
-- **When it occurs:** any request (except `/actuator/health`) without an `X-API-Key` header,
+- **When it occurs:** any request (except `/actuator/health` and `/actuator/info`) without an `X-API-Key` header,
   or with one that doesn't exactly match the key the service was started with
   (`PAYMENTS_API_KEY`). The response is the same for a missing and a wrong key. Nothing is
   read or changed.
