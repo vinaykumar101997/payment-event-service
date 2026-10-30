@@ -5,6 +5,7 @@ import com.example.paymentevent.domain.PaymentStatus;
 import com.example.paymentevent.exception.UnknownScreenedPaymentException;
 import com.example.paymentevent.kafka.PaymentEvent;
 import com.example.paymentevent.kafka.PaymentFailedEvent;
+import com.example.paymentevent.metrics.PaymentMetrics;
 import com.example.paymentevent.outbox.OutboxWriter;
 import com.example.paymentevent.repository.PaymentRepository;
 import org.slf4j.Logger;
@@ -33,12 +34,14 @@ public class ScreeningService {
     private final PaymentRepository paymentRepository;
     private final ScreeningVerdictRepository verdictRepository;
     private final OutboxWriter outboxWriter;
+    private final PaymentMetrics metrics;
 
     public ScreeningService(PaymentRepository paymentRepository, ScreeningVerdictRepository verdictRepository,
-                            OutboxWriter outboxWriter) {
+                            OutboxWriter outboxWriter, PaymentMetrics metrics) {
         this.paymentRepository = paymentRepository;
         this.verdictRepository = verdictRepository;
         this.outboxWriter = outboxWriter;
+        this.metrics = metrics;
     }
 
     @Transactional
@@ -89,6 +92,7 @@ public class ScreeningService {
     void reject(Payment payment, String reason) {
         payment.reject(reason.length() > MAX_FAILURE_REASON_LENGTH ? reason.substring(0, MAX_FAILURE_REASON_LENGTH) : reason);
         outboxWriter.enqueuePaymentFailedEvent(PaymentFailedEvent.from(payment));
+        metrics.finalStatusReached(PaymentStatus.REJECTED);
     }
 
     private static VerdictOutcome outcomeFor(PaymentStatus status, Verdict verdict) {

@@ -7,6 +7,7 @@ import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.actuate.observability.AutoConfigureObservability;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.http.HttpRequest;
@@ -34,7 +35,11 @@ import java.util.UUID;
  * Spring context to a now-dead port. Starting the containers once in a static
  * initializer instead - and never calling stop() - is the documented pattern for sharing
  * containers across test classes; Testcontainers' Ryuk reaper cleans them up on JVM exit.
+ *
+ * AutoConfigureObservability keeps the Prometheus registry that production uses (Spring Boot
+ * tests otherwise swap in a plain in-memory one), so /actuator/prometheus exists here too.
  */
+@AutoConfigureObservability(tracing = false)
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @Import({FaultInjectingPaymentProducer.class, MigrationSessionRecorder.class, RecordingOverdueHook.class})
 public abstract class AbstractIntegrationTest {

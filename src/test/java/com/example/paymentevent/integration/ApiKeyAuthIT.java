@@ -86,12 +86,32 @@ class ApiKeyAuthIT extends AbstractIntegrationTest {
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
     }
 
-    /** No actuator in this build, so the path itself is a 404 - but it must not be a 401. */
+    /** Health and info answer without a key, so liveness checks need no secret; health shows no details. */
     @Test
-    void healthPathIsNotBehindTheKey() {
-        ResponseEntity<String> response = call(HttpMethod.GET, "/actuator/health", null, null);
+    void healthAndInfoAreNotBehindTheKey() {
+        ResponseEntity<String> health = call(HttpMethod.GET, "/actuator/health", null, null);
+        ResponseEntity<String> info = call(HttpMethod.GET, "/actuator/info", null, null);
 
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(health.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(health.getBody()).contains("\"status\":\"UP\"").doesNotContain("components");
+        assertThat(info.getStatusCode()).isEqualTo(HttpStatus.OK);
+    }
+
+    @Test
+    void prometheusNeedsTheKey() throws Exception {
+        assertUnauthorized(call(HttpMethod.GET, "/actuator/prometheus", null, null), "/actuator/prometheus");
+        assertUnauthorized(call(HttpMethod.GET, "/actuator/prometheus", null, "wrong-key"), "/actuator/prometheus");
+
+        ResponseEntity<String> scrape = call(HttpMethod.GET, "/actuator/prometheus", null, TEST_API_KEY);
+
+        assertThat(scrape.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(scrape.getBody()).contains(
+                "payments_final_status_total{status=\"PROCESSED\"}",
+                "payments_screening_overdue_total",
+                "payments_outbox_unpublished",
+                "payments_outbox_oldest_unpublished_age_seconds",
+                "payments_screening_held");
+        assertThat(scrape.getBody()).doesNotContain(TEST_API_KEY);
     }
 
     private void assertUnauthorized(ResponseEntity<String> response, String path) throws Exception {

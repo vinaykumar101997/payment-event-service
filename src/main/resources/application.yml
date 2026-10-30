@@ -66,17 +66,17 @@ spring:
       concurrency: 3
       ack-mode: RECORD
 
-  # OutboxRelay (every 500ms), PaymentSweeper (every 30s), HeldPaymentSweeper (every 60s) and
-  # OutboxRetentionJob (hourly) are all @Scheduled; one thread each, so a slow sweep or purge
-  # can't delay the relay.
+  # OutboxRelay (every 500ms), PaymentSweeper (every 30s), HeldPaymentSweeper (every 60s),
+  # BacklogMetrics (every 15s) and OutboxRetentionJob (hourly) are all @Scheduled; one thread
+  # each, so a slow sweep or purge can't delay the relay.
   task:
     scheduling:
       pool:
-        size: 4
+        size: 5
 
 payments:
   # Required, no default: start-up fails if PAYMENTS_API_KEY is not set. Every request except
-  # /actuator/health must send it in the X-API-Key header.
+  # /actuator/health and /actuator/info must send it in the X-API-Key header.
   api-key: "${PAYMENTS_API_KEY}"
   # Default largest amount a single payment may move, for any currency not listed in
   # max-amount-by-currency (see MoneyRules). Quoted: unquoted, YAML reads it as a float and
@@ -103,6 +103,9 @@ payments:
     max-attempts: 10
   sweeper:
     interval-ms: 30000
+  metrics:
+    # How often BacklogMetrics re-reads the outbox and HELD counts behind its gauges.
+    refresh-interval-ms: 15000
 
 outbox:
   relay:
@@ -117,6 +120,14 @@ outbox:
     days: 30
     batch-size: 1000
     interval-ms: 3600000
+
+# health and info are open; prometheus needs the X-API-Key like the rest of the API
+# (ApiKeySecurityConfig). Health shows only UP or DOWN, no component details.
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
 
 server:
   port: 8080

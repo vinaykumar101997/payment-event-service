@@ -37,6 +37,18 @@
             <artifactId>spring-boot-starter-security</artifactId>
         </dependency>
 
+        <!-- Actuator and the Prometheus registry: /actuator/health, /actuator/info and
+             /actuator/prometheus (metrics/PaymentMetrics, metrics/BacklogMetrics) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+
         <!-- Spring Data JPA (Hibernate) for Account/Payment persistence -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

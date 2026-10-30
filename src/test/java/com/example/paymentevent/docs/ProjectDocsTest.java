@@ -178,7 +178,7 @@ class ProjectDocsTest {
                 limitationsEnd < 0 ? readme.length() : limitationsEnd);
         assertThat(limitations).contains(
                 "No screening service here",
-                "Overdue is a log line only",
+                "Overdue raises no alert",
                 "Dead-lettered verdicts are not replayed",
                 "A lost screening request is not re-sent",
                 "Switching screening on doesn't screen older payments",

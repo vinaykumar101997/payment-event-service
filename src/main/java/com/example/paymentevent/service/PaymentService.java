@@ -16,6 +16,7 @@ import com.example.paymentevent.kafka.PaymentEvent;
 import com.example.paymentevent.kafka.PaymentFailedEvent;
 import com.example.paymentevent.kafka.ScreeningRequestedEvent;
 import com.example.paymentevent.kafka.TransactionEvent;
+import com.example.paymentevent.metrics.PaymentMetrics;
 import com.example.paymentevent.outbox.OutboxWriter;
 import com.example.paymentevent.repository.AccountRepository;
 import com.example.paymentevent.repository.LedgerEntryRepository;
@@ -52,12 +53,13 @@ public class PaymentService {
     private final LedgerEntryRepository ledgerEntryRepository;
     private final OutboxWriter outboxWriter;
     private final MoneyRules moneyRules;
+    private final PaymentMetrics metrics;
     private final int maxProcessingAttempts;
     private final boolean screeningEnabled;
 
     public PaymentService(PaymentRepository paymentRepository, AccountRepository accountRepository,
                           LedgerEntryRepository ledgerEntryRepository, OutboxWriter outboxWriter,
-                          MoneyRules moneyRules,
+                          MoneyRules moneyRules, PaymentMetrics metrics,
                           @Value("${payments.processing.max-attempts:10}") int maxProcessingAttempts,
                           @Value("${payments.screening.enabled:false}") boolean screeningEnabled) {
         this.paymentRepository = paymentRepository;
@@ -65,6 +67,7 @@ public class PaymentService {
         this.ledgerEntryRepository = ledgerEntryRepository;
         this.outboxWriter = outboxWriter;
         this.moneyRules = moneyRules;
+        this.metrics = metrics;
         this.maxProcessingAttempts = maxProcessingAttempts;
         this.screeningEnabled = screeningEnabled;
     }
@@ -208,6 +211,7 @@ public class PaymentService {
             payment.markFailed(reason);
             paymentRepository.save(payment);
             outboxWriter.enqueuePaymentFailedEvent(PaymentFailedEvent.from(payment));
+            metrics.finalStatusReached(PaymentStatus.FAILED);
             log.error("Payment {} rejected, no money moved: {}", paymentId, reason);
             throw new PaymentEventMismatchException(reason);
         }
@@ -220,6 +224,7 @@ public class PaymentService {
             payment.markFailed(ex.getMessage());
             paymentRepository.save(payment);
             outboxWriter.enqueuePaymentFailedEvent(PaymentFailedEvent.from(payment));
+            metrics.finalStatusReached(PaymentStatus.FAILED);
             log.warn("Payment {} failed validation: {}", paymentId, ex.getMessage());
             return PaymentProcessingResult.failed();
         }
@@ -233,6 +238,7 @@ public class PaymentService {
         // Same transaction again: the "transactions" event commits with the money movement,
         // so there is no window in which one is durable and the other isn't.
         outboxWriter.enqueueTransactionEvent(toTransactionEvent(payment));
+        metrics.finalStatusReached(PaymentStatus.PROCESSED);
 
         log.info("Payment {} processed: {} -> {} amount={} {}",
                 paymentId, payment.getFromAccount(), payment.getToAccount(), payment.getAmount(), payment.getCurrency());
@@ -289,6 +295,7 @@ public class PaymentService {
         boolean poisoned = paymentRepository.markPoisonedIfExhausted(
                 paymentId, maxProcessingAttempts, reason, Instant.now()) == 1;
         if (poisoned) {
+            metrics.finalStatusReached(PaymentStatus.POISONED);
             log.error("Payment {} POISONED: {}", paymentId, reason);
         } else {
             log.warn("Processing attempt for payment {} failed and will be retried: {}",

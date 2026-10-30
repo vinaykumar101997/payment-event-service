@@ -87,7 +87,7 @@ show_balance() {
 echo "${BOLD}Payment service demo${RESET}  ${DIM}(project $COMPOSE_PROJECT_NAME)${RESET}"
 echo "${DIM}Starting Postgres, Kafka and the app with docker compose ...${RESET}"
 docker compose up -d --build --wait >"$work/up.log" 2>&1 || { cat "$work/up.log" >&2; fail "docker compose up"; }
-# No actuator in this build, so a 200 for a seeded account is the readiness check.
+# Health and info are open but metrics need the key; a keyed 200 for a seeded account is the readiness check.
 deadline=$((SECONDS + DEMO_TIMEOUT))
 until [ "$(api GET /accounts/ACC-1001 2>/dev/null)" = 200 ]; do
   [ "$SECONDS" -lt "$deadline" ] || { docker compose logs app | tail -n 30 >&2; fail "app not up after ${DEMO_TIMEOUT}s"; }
