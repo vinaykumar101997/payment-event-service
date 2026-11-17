@@ -1,7 +1,9 @@
 package com.example.paymentevent.contracts;
 
+import com.example.paymentevent.kafka.ScreeningRequestedEvent;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.networknt.schema.Error;
 import com.networknt.schema.Schema;
@@ -76,6 +78,26 @@ class ScreeningContractsTest {
         assertInvalid(REQUESTED, e -> e.put("createdAt", "yesterday"));
         assertInvalid(REQUESTED, e -> e.put("eventId", "not-a-uuid"));
         assertInvalid(REQUESTED, e -> e.put("unexpected", "x"));
+        assertInvalid(REQUESTED, e -> e.put("fromAccountCountry", "usa"));
+        assertInvalid(REQUESTED, e -> e.put("toAccountCountry", "gb"));
+        assertInvalid(REQUESTED, e -> e.put("fromAccountHolderName", ""));
+        assertInvalid(REQUESTED, e -> e.put("toAccountHolderName", "x".repeat(141)));
+        assertInvalid(REQUESTED, e -> e.putNull("fromAccountHolderName"));
+    }
+
+    /**
+     * The holder details are optional, and an event stored in the outbox before they existed
+     * must still be readable and go out exactly as it was written, with no null members.
+     */
+    @Test
+    void requestWithoutHolderDetailsIsValidAndSurvivesTheOutboxRoundTrip() throws IOException {
+        ObjectNode event = (ObjectNode) example(REQUESTED);
+        event.remove(List.of("fromAccountHolderName", "fromAccountCountry", "toAccountHolderName", "toAccountCountry"));
+        assertThat(validate(REQUESTED, event)).isEmpty();
+
+        ScreeningRequestedEvent read = MAPPER.treeToValue(event, ScreeningRequestedEvent.class);
+        JsonNode written = MAPPER.valueToTree(read);
+        assertThat(written).isEqualTo(event);
     }
 
     @Test
@@ -89,6 +111,19 @@ class ScreeningContractsTest {
         assertInvalid(COMPLETED, e -> e.put("decidedAt", "2026-13-40T00:00:00Z"));
         assertInvalid(COMPLETED, e -> e.remove("paymentId"));
         assertInvalid(COMPLETED, e -> e.put("unexpected", "x"));
+    }
+
+    @Test
+    void reasonsAreLimitedToTen() throws IOException {
+        ObjectNode event = (ObjectNode) example(COMPLETED);
+        ArrayNode reasons = event.putArray("reasons");
+        for (int i = 1; i <= 10; i++) {
+            reasons.add("reason " + i);
+        }
+        assertThat(validate(COMPLETED, event)).as("10 reasons").isEmpty();
+
+        reasons.add("reason 11");
+        assertThat(validate(COMPLETED, event)).as("11 reasons").isNotEmpty();
     }
 
     @Test

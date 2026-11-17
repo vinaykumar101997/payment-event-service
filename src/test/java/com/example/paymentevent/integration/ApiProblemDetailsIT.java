@@ -50,6 +50,16 @@ class ApiProblemDetailsIT extends AbstractIntegrationTest {
         assertThat(problem.path("errors").path("currency").asText()).contains("ISO currency code");
     }
 
+    /** payment_id is VARCHAR(64); a longer id is refused here instead of failing at the insert. */
+    @Test
+    void paymentIdLongerThan64CharactersIs400ValidationFailed() throws Exception {
+        ResponseEntity<String> response = post(new PaymentRequest("P".repeat(65), "ACC-A", "ACC-B",
+                new BigDecimal("1.00"), "USD"));
+
+        JsonNode problem = assertProblem(response, HttpStatus.BAD_REQUEST, "validation-failed", "/payments");
+        assertThat(problem.path("errors").has("paymentId")).isTrue();
+    }
+
     @Test
     void unparseableBodyIs400MalformedRequest() throws Exception {
         assertProblem(postJson("{\"paymentId\": "), HttpStatus.BAD_REQUEST, "malformed-request", "/payments");

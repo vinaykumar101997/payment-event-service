@@ -128,7 +128,10 @@ public class PaymentService {
             throw ex;
         }
         if (screeningEnabled) {
-            outboxWriter.enqueueScreeningRequestedEvent(ScreeningRequestedEvent.from(payment));
+            // Plain reads, no lock: the holder details are only copied into the event.
+            outboxWriter.enqueueScreeningRequestedEvent(ScreeningRequestedEvent.from(payment,
+                    accountRepository.findById(fromAccount).orElse(null),
+                    accountRepository.findById(toAccount).orElse(null)));
             log.info("Payment {} held for screening", paymentId);
         } else {
             outboxWriter.enqueuePaymentEvent(PaymentEvent.from(payment));

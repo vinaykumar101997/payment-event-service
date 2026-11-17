@@ -174,7 +174,7 @@ The integration tests start real Postgres and Kafka containers once per test run
 
 ## Verification
 
-The build runs 87 unit tests and 83 integration tests, all passing. CI runs `./mvnw -B verify` on a fresh checkout on every push to `main` and every pull request (badge above).
+The build runs 88 unit tests and 84 integration tests, all passing. CI runs `./mvnw -B verify` on a fresh checkout on every push to `main` and every pull request (badge above).
 
 ## Screening hold
 
@@ -227,7 +227,7 @@ Officer decisions (migration V11) are stored once per payment with officer, note
 
 | Topic | Direction | Key | Content |
 |---|---|---|---|
-| `payment.screening.requested` | published (outbox) | paymentId | [`payment.screening.requested.v1`](contracts/payment.screening.requested.v1.schema.json): schemaVersion, eventId, paymentId, accounts, amount as a decimal string, currency, createdAt |
+| `payment.screening.requested` | published (outbox) | paymentId | [`payment.screening.requested.v1`](contracts/payment.screening.requested.v1.schema.json): schemaVersion, eventId, paymentId, accounts, amount as a decimal string, currency, createdAt, and optionally the holder name and country (ISO 3166-1 alpha-2) of each account |
 | `payment.screening.completed` | consumed | paymentId | [`payment.screening.completed.v1`](contracts/payment.screening.completed.v1.schema.json): verdict CLEAR, FLAG, REJECT or ERROR, reasons, optional riskScore, decidedAt, screeningRunId. Read as plain JSON; no Spring type headers needed |
 | `payment.screening.completed.DLT` | published | as received | verdict records that failed the schema or name an unknown payment, byte for byte; also valid verdicts that still failed after about 10 seconds of retries |
 
@@ -288,6 +288,7 @@ The gauges are read from the database on a fixed delay (`payments.metrics.refres
 - **Officer decisions are not individually authenticated.** The `officer` name is self-asserted: anyone holding the shared API key can release or reject a payment under any name, and the fix (OpenID Connect identity from the token's `sub` claim, an officer role, four-eyes approval) is described under [Production hardening](docs/DESIGN.md#production-hardening).
 - **Event order per payment is not guaranteed once a payment can have two events on the same topic.** Today each payment has at most one event per topic, so it doesn't matter yet. Future reversals would need ordered publishing per key.
 - **No screening service here.** This repository only publishes requests, consumes verdicts and holds payments; the Python screening service is separate and not built.
+- **Holder details exist only where someone put them.** A screening request carries an account's holder name and country when the `accounts` row has them. There is no API to create or edit accounts, so only the two seeded accounts do; for any other account the fields are left out.
 - **Overdue raises no alert.** An overdue hold is logged at WARN and counted (`payments_screening_overdue_total`), but nothing here pages anyone; alerting is left to whatever scrapes the metrics.
 - **Dead-lettered verdicts are not replayed.** A verdict on `payment.screening.completed.DLT` stays there; its payment stays HELD until another verdict or an officer decides.
 - **A lost screening request is not re-sent.** If its outbox row goes dead, the payment stays HELD and only shows up as overdue.

@@ -19,7 +19,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
-/** S3: verdicts from payment.screening.completed, validated, applied at most once. */
+/** Verdicts from payment.screening.completed, validated, applied at most once. */
 class ScreeningVerdictIT extends AbstractScreeningIntegrationTest {
 
     private static final String VERDICTS = "payment.screening.completed";

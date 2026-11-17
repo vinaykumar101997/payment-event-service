@@ -9,6 +9,9 @@ each `type` links to the section of this page with the same name.
 `type` values used to be `https://example.com/problems/<slug>`; clients that matched on
 those must switch to the new URIs.
 
+A local compose database created before the comment in migration V8 was reworded fails
+Flyway validation at start-up (the checksum changed); recreate it with `docker-compose down -v`.
+
 Branch on `type`, not on `title` or `detail`: `title` names the kind of problem and `detail`
 explains this occurrence in words that may change. `instance` is the request path.
 
@@ -21,7 +24,7 @@ In the examples, `{base}` stands for the configured base URI.
 
 - **HTTP status:** 400 Bad Request
 - **When it occurs:** one or more fields of `POST /payments` fail validation: a blank
-  `paymentId`, `fromAccount` or `toAccount`; a missing, zero or negative `amount`, or one with
+  `paymentId`, `fromAccount` or `toAccount`; a `paymentId` longer than 64 characters; a missing, zero or negative `amount`, or one with
   more than 17 integer digits or 2 decimal places; a `currency` that is not three upper-case
   letters. The `errors` member maps each invalid field to its message.
 - **Example response:**

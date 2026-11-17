@@ -24,7 +24,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
 /**
- * S5: POST /payments/{id}/release and /reject. Valid only from HELD, idempotent, recorded with
+ * POST /payments/{id}/release and /reject. Valid only from HELD, idempotent, recorded with
  * officer, note and time. Release behaves like a CLEAR verdict, reject like a REJECT.
  * HELD payments are written straight to the database, so this runs in the shared
  * screening-off context.

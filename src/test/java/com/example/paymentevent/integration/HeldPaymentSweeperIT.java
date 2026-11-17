@@ -21,7 +21,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * S4: never auto-approve. A payment HELD longer than payments.screening.timeout (PT30M in the
+ * Never auto-approve. A payment HELD longer than payments.screening.timeout (PT30M in the
  * ITs) is marked overdue, logged and reported to the hook once - and stays HELD, with no
  * outbox event and no money moved.
  */

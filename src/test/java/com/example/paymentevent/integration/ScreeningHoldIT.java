@@ -28,7 +28,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
-/** S2: with screening on, a new payment is HELD and only a screening request leaves the service. */
+/** With screening on, a new payment is HELD and only a screening request leaves the service. */
 class ScreeningHoldIT extends AbstractScreeningIntegrationTest {
 
     @Autowired
@@ -51,6 +51,8 @@ class ScreeningHoldIT extends AbstractScreeningIntegrationTest {
         Account from = accountRepository.save(new Account(id("SRC"), new BigDecimal("100.00"), "USD"));
         Account to = accountRepository.save(new Account(id("DST"), new BigDecimal("0.00"), "USD"));
         String paymentId = id("PAY");
+        // Only the paying side has holder details; the other side must simply be left out.
+        jdbcTemplate.update("UPDATE accounts SET holder_name = 'Alice Example', country = 'US' WHERE id = ?", from.getId());
 
         ResponseEntity<String> response = restTemplate.postForEntity("/payments",
                 new PaymentRequest(paymentId, from.getId(), to.getId(), new BigDecimal("25.00"), "USD"), String.class);
@@ -66,6 +68,10 @@ class ScreeningHoldIT extends AbstractScreeningIntegrationTest {
         assertThat(requestedSchema().validate(payload)).isEmpty();
         assertThat(payload.path("paymentId").asText()).isEqualTo(paymentId);
         assertThat(payload.path("amount").asText()).isEqualTo("25.00");
+        assertThat(payload.path("fromAccountHolderName").asText()).isEqualTo("Alice Example");
+        assertThat(payload.path("fromAccountCountry").asText()).isEqualTo("US");
+        assertThat(payload.has("toAccountHolderName")).isFalse();
+        assertThat(payload.has("toAccountCountry")).isFalse();
 
         assertThat(observeRecordKey("payment.screening.requested", paymentId, Duration.ofSeconds(20))).isTrue();
         assertThat(observeRecordKey("payments", paymentId, Duration.ofSeconds(3))).isFalse();

@@ -28,7 +28,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * T9: GET /payments?status=HELD lists held payments oldest first, with cursor pagination, an
+ * GET /payments?status=HELD lists held payments oldest first, with cursor pagination, an
  * optional overdue filter, and the reasons and riskScore of each payment's latest verdict.
  *
  * Every IT shares one database, and other classes leave HELD payments behind. The payments

@@ -2,7 +2,9 @@
 
 JSON Schemas (draft 2020-12) for the events exchanged with the screening service. The version
 is part of the file name; a breaking change gets a new file (`.v2`), never an edit to a
-published one.
+published one. A new optional field is not a breaking change and is added to the existing
+file; a consumer must validate against the current copy of the schema, since an older copy
+rejects the new field.
 
 | Schema | Topic | Producer | Consumer |
 |---|---|---|---|
