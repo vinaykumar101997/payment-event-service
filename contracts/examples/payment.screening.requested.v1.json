@@ -6,5 +6,9 @@
   "toAccount": "ACC-1002",
   "amount": "125.50",
   "currency": "USD",
-  "createdAt": "2026-10-15T09:30:00.123456Z"
+  "createdAt": "2026-10-15T09:30:00.123456Z",
+  "fromAccountHolderName": "Alice Example",
+  "fromAccountCountry": "US",
+  "toAccountHolderName": "Bob Example",
+  "toAccountCountry": "GB"
 }

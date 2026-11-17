@@ -24,7 +24,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * S6: every API path needs the X-API-Key header matching PAYMENTS_API_KEY; /actuator/health
+ * Every API path needs the X-API-Key header matching PAYMENTS_API_KEY; /actuator/health
  * doesn't. Uses its own client, without the key interceptor every other IT gets from
  * AbstractIntegrationTest.
  */

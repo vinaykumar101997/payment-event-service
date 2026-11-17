@@ -24,7 +24,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
 /**
- * S7: the screening hold end to end, over real Kafka and Postgres, the way the Python
+ * The screening hold end to end, over real Kafka and Postgres, the way the Python
  * screening service would drive it: our payment.screening.requested goes out, verdicts come
  * back as plain JSON on payment.screening.completed, officers use the REST endpoints. After
  * every scenario the whole ledger must still reconcile. The screening-off flow is

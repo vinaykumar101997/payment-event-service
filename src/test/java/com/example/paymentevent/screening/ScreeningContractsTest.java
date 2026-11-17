@@ -13,7 +13,7 @@ import java.time.Instant;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** The verdict consumer's gate: only a payload that passes the S1 schema becomes an event. */
+/** The verdict consumer's gate: only a payload that passes the payment.screening.completed schema becomes an event. */
 class ScreeningContractsTest {
 
     private final ScreeningContracts contracts =

@@ -35,6 +35,28 @@
       "description": "When the payment was created (RFC 3339, UTC).",
       "type": "string",
       "format": "date-time"
+    },
+    "fromAccountHolderName": {
+      "description": "Optional. Name of the holder of fromAccount; left out when the service has none.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 140
+    },
+    "fromAccountCountry": {
+      "description": "Optional. Country of fromAccount, ISO 3166-1 alpha-2 (e.g. \"US\").",
+      "type": "string",
+      "pattern": "^[A-Z]{2}$"
+    },
+    "toAccountHolderName": {
+      "description": "Optional. Name of the holder of toAccount; left out when the service has none.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 140
+    },
+    "toAccountCountry": {
+      "description": "Optional. Country of toAccount, ISO 3166-1 alpha-2 (e.g. \"GB\").",
+      "type": "string",
+      "pattern": "^[A-Z]{2}$"
     }
   }
 }

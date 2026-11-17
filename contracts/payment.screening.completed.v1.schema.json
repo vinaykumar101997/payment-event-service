@@ -25,6 +25,7 @@
     "reasons": {
       "description": "Human-readable reasons for the verdict. May be empty.",
       "type": "array",
+      "maxItems": 10,
       "items": { "type": "string", "maxLength": 500 }
     },
     "riskScore": {

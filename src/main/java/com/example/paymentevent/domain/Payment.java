@@ -16,6 +16,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.HexFormat;
 
 /**
@@ -85,7 +86,8 @@ public class Payment implements Persistable<String> {
         this.amount = amount;
         this.currency = currency;
         this.status = PaymentStatus.RECEIVED;
-        this.createdAt = Instant.now();
+        // Postgres keeps microseconds; truncating here makes the first response match every later read.
+        this.createdAt = Instant.now().truncatedTo(ChronoUnit.MICROS);
         this.requestHash = requestHashOf(paymentId, fromAccount, toAccount, amount, currency);
     }
 

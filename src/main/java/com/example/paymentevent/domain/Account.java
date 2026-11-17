@@ -32,6 +32,14 @@ public class Account {
     @Column(name = "opening_balance", nullable = false, updatable = false)
     private BigDecimal openingBalance;
 
+    /** Null for accounts that have none recorded; sent to screening when present. */
+    @Column(name = "holder_name")
+    private String holderName;
+
+    /** ISO 3166-1 alpha-2, or null. */
+    @Column(name = "country")
+    private String country;
+
     protected Account() {
         // required by JPA
     }
@@ -70,5 +78,13 @@ public class Account {
 
     public BigDecimal getOpeningBalance() {
         return openingBalance;
+    }
+
+    public String getHolderName() {
+        return holderName;
+    }
+
+    public String getCountry() {
+        return country;
     }
 }
